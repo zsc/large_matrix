@@ -132,9 +132,9 @@
 
 ## 附录
 
-### [附录A：数值稳定性速查表](appendixA.md)
-### [附录B：性能调优检查清单](appendixB.md)
-### [附录C：常用矩阵恒等式](appendixC.md)
+### [附录A：数值稳定性速查表](chapter19.md)
+### [附录B：性能调优检查清单](chapter20.md)
+### [附录C：常用矩阵恒等式](chapter21.md)
 
 ## 使用说明
 
