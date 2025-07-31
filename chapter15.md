@@ -6,7 +6,7 @@
 
 ### 15.1.1 时间衰减的数学建模
 
-在实时推荐场景中，用户兴趣随时间演化，旧数据的重要性逐渐降低。我们需要设计合理的遗忘机制来平衡历史信息与新鲜度。
+在实时推荐场景中，用户兴趣随时间演化，旧数据的重要性逐渐降低。我们需要设计合理的遗忘机制来平衡历史信息与新鲜度。遗忘机制的设计直接影响模型对趋势变化的敏感度和稳定性。
 
 **指数遗忘模型**
 
@@ -14,6 +14,11 @@
 $$\mathcal{L}_t = \sum_{(i,j) \in \Omega_t} w_{ij}^{(t)} (r_{ij} - \mathbf{u}_i^T \mathbf{v}_j)^2 + \lambda (\|\mathbf{U}\|_F^2 + \|\mathbf{V}\|_F^2)$$
 
 其中时间权重 $w_{ij}^{(t)} = \exp(-\beta(t - t_{ij}))$，$t_{ij}$ 是观测时间，$\beta$ 控制遗忘速率。
+
+指数遗忘的优势在于：
+- 平滑的权重衰减，避免突变
+- 参数 $\beta$ 具有明确的物理意义（半衰期 $t_{1/2} = \ln(2)/\beta$）
+- 与在线学习理论中的指数加权平均（EWA）相联系
 
 **滑动窗口方法**
 
@@ -23,7 +28,19 @@ $$w_{ij}^{(t)} = \begin{cases}
 0 & \text{otherwise}
 \end{cases}$$
 
-这种硬截断虽然简单，但可能导致信息突变。
+这种硬截断虽然简单，但可能导致信息突变。实践中常用软窗口变体：
+$$w_{ij}^{(t)} = \sigma\left(\frac{W - (t - t_{ij})}{\tau}\right)$$
+其中 $\sigma$ 是sigmoid函数，$\tau$ 控制过渡的平滑度。
+
+**自适应遗忘模型**
+
+更高级的方法是让遗忘率随数据特性动态调整：
+$$\beta_{ij}(t) = \beta_0 \cdot f(\text{volatility}_i, \text{popularity}_j, \text{sparsity}_{ij})$$
+
+其中：
+- $\text{volatility}_i$ 衡量用户兴趣的变化速度
+- $\text{popularity}_j$ 反映物品的流行度趋势
+- $\text{sparsity}_{ij}$ 考虑数据稀疏性
 
 ### 15.1.2 增量SGD的收敛性分析
 
@@ -33,10 +50,28 @@ $$\mathbf{v}_{j_t} \leftarrow \mathbf{v}_{j_t} - \eta_t \nabla_{\mathbf{v}_{j_t}
 
 其中 $\ell_t = (r_t - \mathbf{u}_{i_t}^T \mathbf{v}_{j_t})^2 + \lambda(\|\mathbf{u}_{i_t}\|^2 + \|\mathbf{v}_{j_t}\|^2)$。
 
+**收敛性定理**（非凸情况）
+
+在以下条件下：
+1. 损失函数 $\ell_t$ 是 $L$-光滑的
+2. 梯度有界：$\|\nabla \ell_t\| \leq G$
+3. 学习率满足：$\eta_t = \eta_0/\sqrt{t}$
+
+则增量SGD收敛到稳定点的速率为：
+$$\mathbb{E}\left[\frac{1}{T}\sum_{t=1}^T \|\nabla \mathcal{L}_t\|^2\right] = O\left(\frac{1}{\sqrt{T}}\right)$$
+
+**带遗忘的SGD分析**
+
+考虑指数遗忘权重，修正的更新规则变为：
+$$\mathbf{u}_{i_t} \leftarrow (1-\gamma)\mathbf{u}_{i_t} - \eta_t e^{-\beta(t-t_{ij})} \nabla_{\mathbf{u}_{i_t}} \ell_t$$
+
+其中 $\gamma$ 是衰减因子，防止历史信息完全主导。
+
 **关键研究方向**：
-- 非凸优化的在线regret界
+- 非凸优化的在线regret界（特别是矩阵分解的低秩约束）
 - 自适应学习率（AdaGrad、Adam）在矩阵分解中的理论保证
 - 稀疏数据流下的样本复杂度
+- 时变环境下的追踪误差（tracking error）分析
 
 ### 15.1.3 动态正则化策略
 
@@ -46,16 +81,57 @@ $$\lambda_i^{(t)} = \lambda_0 / \sqrt{n_i^{(t)} + 1}$$
 
 其中 $n_i^{(t)}$ 是用户 $i$ 到时刻 $t$ 的交互次数。
 
+**理论基础**
+
+这种设计基于贝叶斯观点：
+- 先验：$\mathbf{u}_i \sim \mathcal{N}(0, \sigma^2\mathbf{I})$
+- 后验精度随观测数增加：$\text{precision} \propto n_i^{(t)}$
+- 等价于自适应正则化
+
+**多尺度正则化**
+
+考虑不同时间尺度的行为：
+$$\lambda_i^{(t)} = \lambda_{\text{long}} / \sqrt{n_i^{\text{all}}} + \lambda_{\text{short}} / \sqrt{n_i^{\text{recent}}}$$
+
+其中：
+- $n_i^{\text{all}}$ 是历史总交互数
+- $n_i^{\text{recent}}$ 是近期（如最近7天）交互数
+
 **数值稳定性考虑**：
-- 防止除零错误
-- 正则化参数的上下界限制
-- 增量统计量的精确维护
+- 防止除零错误：使用 $n_i^{(t)} + \epsilon$，$\epsilon \sim 0.1$
+- 正则化参数的上下界限制：$\lambda_{\min} \leq \lambda_i^{(t)} \leq \lambda_{\max}$
+- 增量统计量的精确维护：使用Welford算法计算在线均值和方差
+- 数值下溢处理：对极小的正则化值使用对数空间计算
+
+### 15.1.4 混合遗忘策略
+
+实践中，单一遗忘机制往往不够灵活。混合策略结合多种方法的优势：
+
+**分层遗忘模型**
+$$w_{ij}^{(t)} = \alpha \cdot w_{\text{exp}}^{(t)} + (1-\alpha) \cdot w_{\text{window}}^{(t)}$$
+
+其中 $\alpha$ 可以自适应调整：
+$$\alpha(t) = \sigma\left(\frac{\text{MSE}_{\text{exp}} - \text{MSE}_{\text{window}}}{\tau}\right)$$
+
+**事件驱动遗忘**
+
+某些事件（如节假日、促销）会导致用户行为突变：
+$$\beta(t) = \begin{cases}
+\beta_{\text{normal}} & \text{常规时期} \\
+\beta_{\text{fast}} & \text{事件期间} \\
+\beta_{\text{recovery}} & \text{事件后恢复期}
+\end{cases}$$
+
+**研究挑战**：
+- 自动检测行为模式变化点
+- 多用户群体的差异化遗忘策略
+- 遗忘机制与推荐多样性的关系
 
 ## 15.2 用户/物品嵌入的快速更新
 
 ### 15.2.1 秩一更新的Sherman-Morrison公式
 
-当新增一个评分时，可以利用秩一更新避免完全重新计算：
+当新增一个评分时，可以利用秩一更新避免完全重新计算。这在实时系统中至关重要，将更新复杂度从 $O(r^3)$ 降至 $O(r^2)$。
 
 给定 $\mathbf{A} = \mathbf{X}^T\mathbf{X} + \lambda\mathbf{I}$，新增样本 $(\mathbf{x}, y)$ 后：
 $$\mathbf{A}' = \mathbf{A} + \mathbf{x}\mathbf{x}^T$$
@@ -63,61 +139,304 @@ $$\mathbf{A}' = \mathbf{A} + \mathbf{x}\mathbf{x}^T$$
 利用Sherman-Morrison公式：
 $$(\mathbf{A}')^{-1} = \mathbf{A}^{-1} - \frac{\mathbf{A}^{-1}\mathbf{x}\mathbf{x}^T\mathbf{A}^{-1}}{1 + \mathbf{x}^T\mathbf{A}^{-1}\mathbf{x}}$$
 
+**数值稳定性增强**
+
+标准Sherman-Morrison公式在 $1 + \mathbf{x}^T\mathbf{A}^{-1}\mathbf{x} \approx 0$ 时不稳定。稳定版本：
+
+$$(\mathbf{A}')^{-1} = \mathbf{A}^{-1} - \frac{\mathbf{u}\mathbf{u}^T}{1 + \|\mathbf{u}\|^2}$$
+其中 $\mathbf{u} = \mathbf{A}^{-1/2}\mathbf{x}$
+
+**删除操作的处理**
+
+当需要删除旧数据（遗忘）时，使用减法版本：
+$$(\mathbf{A} - \mathbf{x}\mathbf{x}^T)^{-1} = \mathbf{A}^{-1} + \frac{\mathbf{A}^{-1}\mathbf{x}\mathbf{x}^T\mathbf{A}^{-1}}{1 - \mathbf{x}^T\mathbf{A}^{-1}\mathbf{x}}$$
+
+注意：需要检查 $\mathbf{x}^T\mathbf{A}^{-1}\mathbf{x} < 1$ 以保证正定性。
+
+**应用于矩阵分解**
+
+对于用户嵌入更新：
+$$\mathbf{u}_i = (\mathbf{V}_{\Omega_i}^T\mathbf{V}_{\Omega_i} + \lambda\mathbf{I})^{-1}\mathbf{V}_{\Omega_i}^T\mathbf{r}_i$$
+
+新增评分 $(i,j,r_{ij})$ 后，只需更新：
+1. $\mathbf{A}_i' = \mathbf{A}_i + \mathbf{v}_j\mathbf{v}_j^T$
+2. $\mathbf{b}_i' = \mathbf{b}_i + r_{ij}\mathbf{v}_j$
+3. $\mathbf{u}_i' = (\mathbf{A}_i')^{-1}\mathbf{b}_i'$
+
 ### 15.2.2 块更新与并行化
 
 对于批量更新，Woodbury矩阵恒等式提供了高效方案：
 $$(\mathbf{A} + \mathbf{U}\mathbf{C}\mathbf{V}^T)^{-1} = \mathbf{A}^{-1} - \mathbf{A}^{-1}\mathbf{U}(\mathbf{C}^{-1} + \mathbf{V}^T\mathbf{A}^{-1}\mathbf{U})^{-1}\mathbf{V}^T\mathbf{A}^{-1}$$
 
+**批量评分更新**
+
+当同时到达 $k$ 个新评分时：
+- $\mathbf{U} = [\mathbf{v}_{j_1}, ..., \mathbf{v}_{j_k}]$
+- $\mathbf{C} = \text{diag}(1, ..., 1)$
+- $\mathbf{V} = \mathbf{U}$
+
+复杂度：$O(r^2k + k^3)$，当 $k \ll r$ 时高效。
+
+**并行化策略**
+
+1. **用户级并行**：不同用户的嵌入可独立更新
+   ```
+   parallel for each user i:
+       update A_i and u_i
+   ```
+
+2. **批内并行**：利用矩阵乘法的并行性
+   - BLAS Level 3操作：`gemm`, `syrk`
+   - GPU加速：适合大批量更新
+
+3. **流水线并行**：
+   - Stage 1: 收集更新，形成批
+   - Stage 2: 计算矩阵更新
+   - Stage 3: 更新嵌入向量
+
 **实现要点**：
 - 缓存 $\mathbf{A}^{-1}$ 的分解形式（如Cholesky）
-- 异步更新的一致性保证
-- 数值误差累积的定期修正
+- 异步更新的一致性保证：使用版本控制
+- 数值误差累积的定期修正：每 $N$ 次更新后重新计算
+- 内存局部性优化：按用户分组存储相关矩阵
 
 ### 15.2.3 懒惰求值与缓存策略
 
-不是所有嵌入都需要实时更新。懒惰求值策略：
+不是所有嵌入都需要实时更新。懒惰求值策略大幅减少计算量：
 
-1. **访问触发更新**：只在查询时更新相关嵌入
-2. **优先级队列**：根据访问频率和更新紧急度排序
-3. **增量缓存失效**：精确追踪哪些计算结果需要更新
+**三级更新策略**
+
+1. **立即更新**（热用户）：
+   - 活跃用户（最近1小时有交互）
+   - 高价值用户（VIP、付费用户）
+   - 更新延迟 < 100ms
+
+2. **延迟更新**（温用户）：
+   - 周期性活跃用户
+   - 批量聚合后更新
+   - 更新延迟 < 1分钟
+
+3. **懒惰更新**（冷用户）：
+   - 低活跃用户
+   - 仅在查询时更新
+   - 可接受陈旧结果
+
+**智能缓存管理**
+
+```
+CacheEntry {
+    embedding: Vector
+    last_update: Timestamp
+    pending_updates: Queue<Update>
+    access_count: int
+    update_cost: float
+}
+```
+
+**更新决策函数**：
+$$\text{should\_update} = \frac{\text{staleness} \times \text{importance}}{\text{update\_cost}} > \theta$$
+
+其中：
+- $\text{staleness} = t_{\text{now}} - t_{\text{last\_update}}$
+- $\text{importance} = f(\text{access\_frequency}, \text{user\_value})$
+- $\text{update\_cost}$ 考虑计算复杂度和当前负载
+
+**版本化缓存**
+
+支持多版本读取，避免更新阻塞查询：
+```
+VersionedEmbedding {
+    versions: RingBuffer<(Version, Embedding)>
+    current_version: AtomicInt
+}
+```
 
 **研究线索**：
 - 缓存命中率与推荐质量的权衡
-- 分布式环境下的缓存一致性
-- 近似更新的误差界
+- 分布式环境下的缓存一致性（使用Raft或Paxos）
+- 近似更新的误差界：$\|\mathbf{u}_{\text{approx}} - \mathbf{u}_{\text{exact}}\| \leq \epsilon$
+- 自适应缓存大小：基于内存压力和访问模式
+
+### 15.2.4 增量矩阵分解的并行算法
+
+**Lock-Free更新算法**
+
+避免锁竞争的无锁更新：
+```
+AtomicUpdate(user_id, item_id, rating):
+    loop:
+        old_A = load(A[user_id])
+        new_A = old_A + v[item_id] * v[item_id]'
+        if CAS(A[user_id], old_A, new_A):
+            break
+```
+
+**异步SGD的理论保证**
+
+在延迟 $\tau$ 有界的情况下：
+$$\mathbb{E}[\|\mathbf{u}_T - \mathbf{u}^*\|^2] \leq O\left(\frac{1}{\sqrt{T}} + \frac{\tau}{T}\right)$$
+
+这表明适度的异步不会显著影响收敛性。
+
+**分布式快照**
+
+使用Chandy-Lamport算法实现一致性快照：
+1. 主节点发起快照
+2. 各节点记录本地状态
+3. 记录传输中的消息
+4. 组合形成全局一致状态
+
+这允许在不停止系统的情况下进行checkpoint和恢复。
 
 ## 15.3 冷启动问题的矩阵补全视角
 
 ### 15.3.1 迁移学习框架
 
-将冷启动视为少样本矩阵补全问题，利用已有用户/物品的知识：
+将冷启动视为少样本矩阵补全问题，利用已有用户/物品的知识构建有效的先验。这种方法将冷启动从"无中生有"转变为"知识迁移"。
 
-**共享隐空间模型**：
+**共享隐空间模型**
+
+基本假设：新用户的隐向量可以从其特征预测：
 $$\mathbf{u}_{\text{new}} = \mathbf{W}_u \mathbf{f}_u + \boldsymbol{\epsilon}_u$$
 
-其中 $\mathbf{f}_u$ 是用户特征，$\mathbf{W}_u$ 是学习的映射矩阵。
+其中：
+- $\mathbf{f}_u \in \mathbb{R}^d$ 是用户特征（人口统计学、注册信息等）
+- $\mathbf{W}_u \in \mathbb{R}^{r \times d}$ 是学习的映射矩阵
+- $\boldsymbol{\epsilon}_u$ 是个性化偏差
+
+**分层贝叶斯模型**
+
+更精细的建模考虑不确定性：
+$$\begin{aligned}
+\mathbf{u}_i &\sim \mathcal{N}(\mathbf{W}_u \mathbf{f}_i, \boldsymbol{\Sigma}_u) \\
+\mathbf{W}_u &\sim \mathcal{MN}(\mathbf{M}_0, \boldsymbol{\Sigma}_u, \boldsymbol{\Omega}) \\
+r_{ij} &\sim \mathcal{N}(\mathbf{u}_i^T \mathbf{v}_j, \sigma^2)
+\end{aligned}$$
+
+这提供了预测的不确定性估计，对主动学习至关重要。
+
+**元学习视角**
+
+将冷启动视为few-shot learning问题：
+1. **元训练**：在历史用户上学习"如何快速学习"
+2. **元测试**：对新用户快速适应
+
+使用MAML（Model-Agnostic Meta-Learning）框架：
+$$\mathbf{W}^* = \arg\min_{\mathbf{W}} \sum_{i \in \mathcal{T}_{\text{train}}} \mathcal{L}(\mathbf{W} - \alpha\nabla_{\mathbf{W}}\mathcal{L}_i(\mathbf{W}))$$
+
+**多任务学习**
+
+不同用户群体共享部分结构：
+$$\mathbf{U} = \mathbf{U}_{\text{shared}} + \sum_{k=1}^K \mathbf{U}_k \odot \mathbf{Z}_k$$
+
+其中 $\mathbf{Z}_k$ 是群体指示矩阵。
 
 ### 15.3.2 主动学习策略
 
-选择最优的初始交互来快速学习新用户偏好：
+选择最优的初始交互来快速学习新用户偏好。关键是平衡探索（减少不确定性）与利用（提供好的推荐）。
 
-**不确定性采样**：
+**不确定性采样**
+
+基于后验方差选择物品：
 $$j^* = \arg\max_j \text{Var}[\hat{r}_{ij} | \mathcal{D}]$$
 
-**信息增益最大化**：
+对于线性模型，方差可解析计算：
+$$\text{Var}[\hat{r}_{ij}] = \mathbf{v}_j^T (\mathbf{V}_{\mathcal{D}}^T\mathbf{V}_{\mathcal{D}} + \lambda\mathbf{I})^{-1} \mathbf{v}_j$$
+
+**信息增益最大化**
+
+选择最大化互信息的物品：
 $$j^* = \arg\max_j I(\mathbf{u}_i; r_{ij} | \mathcal{D})$$
+
+对于高斯分布：
+$$I(\mathbf{u}_i; r_{ij}) = \frac{1}{2}\log\left(1 + \frac{\mathbf{v}_j^T\boldsymbol{\Sigma}_{\mathbf{u}|i}\mathbf{v}_j}{\sigma^2}\right)$$
+
+**Thompson采样**
+
+平衡探索与利用的贝叶斯方法：
+1. 从后验采样：$\tilde{\mathbf{u}}_i \sim p(\mathbf{u}_i | \mathcal{D})$
+2. 选择期望回报最高的物品：$j^* = \arg\max_j \tilde{\mathbf{u}}_i^T \mathbf{v}_j$
+
+**批量主动学习**
+
+同时选择 $k$ 个物品的次模优化问题：
+$$\mathcal{S}^* = \arg\max_{|\mathcal{S}|=k} f(\mathcal{S})$$
+
+其中 $f(\mathcal{S})$ 是次模函数（如信息增益）。贪心算法提供 $(1-1/e)$ 近似保证。
+
+**上下文相关的主动学习**
+
+考虑时间、位置等上下文：
+$$j^* = \arg\max_j g(\text{uncertainty}_j, \text{context}_t, \text{diversity}(\mathcal{S} \cup \{j\}))$$
 
 ### 15.3.3 理论保证
 
-**样本复杂度界**：给定秩-$r$ 矩阵，达到 $\epsilon$-精度需要的样本数：
+**样本复杂度界**
+
+给定秩-$r$ 矩阵，达到 $\epsilon$-精度需要的样本数：
+
+**均匀采样情况**：
 $$m = O(r(n_1 + n_2)\log(1/\epsilon))$$
 
-但实际中的非均匀采样和噪声使分析更加复杂。
+**非均匀采样的改进界**：
+$$m = O(\mu r \log(n_1 + n_2) \log(1/\epsilon))$$
+其中 $\mu$ 是相干性参数。
+
+**在线学习的regret界**
+
+对于冷启动用户的累积regret：
+$$R_T = \sum_{t=1}^T (r^* - r_t) = O(\sqrt{rT\log T})$$
+
+其中 $r^*$ 是最优推荐的回报。
+
+**主动学习的加速**
+
+相比随机选择，主动学习可以指数级减少样本需求：
+- 随机：$m_{\text{random}} = O(r^2/\epsilon^2)$
+- 主动：$m_{\text{active}} = O(r\log(1/\epsilon))$
+
+**矩阵补全的信息论下界**
+
+任何算法至少需要：
+$$m \geq c \cdot r(n_1 + n_2 - r)$$
+个观测才能精确恢复秩-$r$ 矩阵。
 
 **关键挑战**：
 - 非均匀缺失模式下的理论分析
 - 在线设置下的自适应采样
-- 隐私保护约束下的冷启动
+- 隐私保护约束下的冷启动（差分隐私）
+- 对抗性环境下的鲁棒性保证
+
+### 15.3.4 实用技术与优化
+
+**混合方法**
+
+结合多种信息源：
+1. **内容特征**：使用深度学习提取
+2. **社交信号**：利用用户关系网络
+3. **隐式反馈**：浏览、搜索等弱信号
+4. **跨域信息**：从其他产品迁移知识
+
+**渐进式个性化**
+
+随着数据积累逐步过渡：
+$$\mathbf{u}_i(t) = \alpha(t) \cdot \mathbf{u}_{\text{prior}} + (1-\alpha(t)) \cdot \mathbf{u}_{\text{learned}}$$
+
+其中 $\alpha(t) = \exp(-\gamma \cdot n_i(t))$。
+
+**群体先验**
+
+利用相似用户群体：
+$$\mathbf{u}_{\text{prior}} = \frac{1}{|\mathcal{N}_i|}\sum_{k \in \mathcal{N}_i} \mathbf{u}_k$$
+
+其中 $\mathcal{N}_i$ 是基于特征的最近邻。
+
+**在线更新的数值技巧**
+
+1. **增量SVD**：避免重新分解
+2. **稀疏更新**：只更新相关维度
+3. **量化嵌入**：减少存储和计算
+4. **分级精度**：新用户用低精度，逐步提升
 
 ## 15.4 时序动态的矩阵建模
 
