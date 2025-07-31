@@ -24,6 +24,20 @@ $$\mathbf{A}_t = \sum_{i=1}^t \mathbf{x}_i\mathbf{x}_i^T \quad \text{或} \quad 
 3. **实时更新**：更新复杂度需远低于批处理SVD的$O(n^3)$
 4. **精度保证**：与最优秩$k$近似的误差有界
 
+**数学形式化**：定义流式低秩近似问题为
+$$\min_{\tilde{\mathbf{A}}_t: \text{rank}(\tilde{\mathbf{A}}_t) \leq k} \|\mathbf{A}_t - \tilde{\mathbf{A}}_t\|_F^2$$
+
+在约束条件下：
+- 空间复杂度：$O(nk + \text{poly}(k))$
+- 更新时间：$O(nk^2)$每个数据点
+- 仅使用过去观测$\{\mathbf{x}_1, \ldots, \mathbf{x}_t\}$
+
+**实际应用场景**：
+- **推荐系统**：用户-物品交互矩阵的实时更新
+- **网络监控**：流量矩阵的异常检测
+- **金融数据**：协方差矩阵的在线估计
+- **计算机视觉**：视频流的背景建模
+
 ### 13.1.2 性能度量与理论界限
 
 定义累积regret：
@@ -35,6 +49,27 @@ $$R_T = \sum_{t=1}^T \|\mathbf{A}_t - \tilde{\mathbf{A}}_t\|_F^2 - \sum_{t=1}^T 
 $$R_T \leq O(k\log T \cdot \sum_{j=k+1}^n \lambda_j(\mathbf{A}_T))$$
 
 这表明额外误差仅对数增长于时间$T$。
+
+**证明要点**：
+1. 利用矩阵扰动理论分析单步误差
+2. 通过telescoping sum技术累积误差界
+3. 应用在线学习的regret分析框架
+
+**更细致的性能度量**：
+
+**相对误差**：
+$$\text{RelErr}_t = \frac{\|\mathbf{A}_t - \tilde{\mathbf{A}}_t\|_F}{\|\mathbf{A}_t\|_F}$$
+
+**子空间距离**（更敏感的度量）：
+$$d_{\text{sub}}(\mathbf{U}_t, \tilde{\mathbf{U}}_t) = \|\mathbf{U}_t\mathbf{U}_t^T - \tilde{\mathbf{U}}_t\tilde{\mathbf{U}}_t^T\|_F$$
+
+**投影误差**（应用导向）：
+$$\text{ProjErr}_t = \mathbb{E}_{\mathbf{x}}[\|\mathbf{x} - \tilde{\mathbf{U}}_t\tilde{\mathbf{U}}_t^T\mathbf{x}\|^2]$$
+
+**定理13.2**（子空间追踪）：在温和条件下，
+$$d_{\text{sub}}(\mathbf{U}_t, \tilde{\mathbf{U}}_t) \leq \frac{C}{\lambda_k(\mathbf{A}_t) - \lambda_{k+1}(\mathbf{A}_t)} \cdot \text{err}_t$$
+
+其中分母是特征值间隙，决定了子空间分离的难度。
 
 ### 13.1.3 基础增量框架
 
@@ -57,6 +92,49 @@ For t = 1, 2, ...
 - **截断策略**：如何选择保留的奇异值/向量
 - **数值稳定化**：周期性正交化的时机
 
+**详细的扩展策略分析**：
+
+**策略1：固定阈值**
+```
+if ‖r‖ > θ:
+    扩展子空间
+else:
+    仅更新系数
+```
+优点：简单直观
+缺点：阈值选择困难，对数据尺度敏感
+
+**策略2：相对阈值**
+```
+if ‖r‖/‖xₜ‖ > θ_rel:
+    扩展子空间
+```
+优点：尺度不变性
+适用：数据范数变化大的场景
+
+**策略3：累积误差**
+```
+维护累积残差能量E_res
+if E_res > θ_energy:
+    扩展并重置E_res
+```
+优点：考虑历史信息
+适用：缓慢变化的数据流
+
+**截断策略比较**：
+
+1. **硬阈值截断**：保留前$k$个奇异值
+   - 优点：秩严格受控
+   - 缺点：可能丢失重要信息
+
+2. **软阈值截断**：$\sigma_i \leftarrow \max(\sigma_i - \tau, 0)$
+   - 优点：平滑过渡
+   - 应用：去噪场景
+
+3. **能量保留截断**：保留95%能量的最小秩
+   - 优点：自适应数据复杂度
+   - 缺点：秩可能波动
+
 ### 13.1.4 与在线凸优化的联系
 
 将低秩近似视为约束优化：
@@ -64,10 +142,44 @@ $$\min_{\mathbf{U}\in\mathbb{R}^{n\times k}} \sum_{t=1}^T \ell_t(\mathbf{U}) = \
 
 这建立了与在线梯度下降、镜像下降等经典算法的联系。特别地，Oja's rule可视为此问题的随机梯度解法。
 
+**Oja's算法详解**：
+更新规则：
+$$\mathbf{U}_{t+1} = \mathbf{U}_t + \eta_t(\mathbf{x}_t\mathbf{x}_t^T - \mathbf{U}_t\mathbf{U}_t^T\mathbf{x}_t\mathbf{x}_t^T)\mathbf{U}_t$$
+
+**收敛性质**：
+- 步长$\eta_t = c/t$时，$\mathbb{E}[\|\mathbf{U}_t\mathbf{U}_t^T - \mathbf{U}_*\mathbf{U}_*^T\|_F^2] = O(1/t)$
+- 需要特征值间隙条件：$\lambda_k > \lambda_{k+1}$
+
+**推广：在线矩阵流形优化**
+
+考虑Stiefel流形约束：$\mathbf{U}^T\mathbf{U} = \mathbf{I}_k$
+
+**Riemannian SGD**：
+```
+1. 计算欧氏梯度：∇f(Uₜ)
+2. 投影到切空间：grad = ∇f - Uₜ(Uₜᵀ∇f)
+3. 沿测地线更新：Uₜ₊₁ = Retr(Uₜ, -ηₜ·grad)
+```
+
+其中Retraction可选：
+- QR分解：$\text{Retr}(\mathbf{U}, \boldsymbol{\xi}) = \text{qr}(\mathbf{U} + \boldsymbol{\xi})$
+- Cayley变换：计算更精确但更昂贵
+
+**与经典在线算法的对比**：
+
+| 算法 | 更新复杂度 | 收敛率 | 约束处理 |
+|------|-----------|--------|----------|
+| Oja's rule | $O(nk)$ | $O(1/t)$ | 渐近满足 |
+| 在线梯度下降 | $O(nk)$ | $O(\sqrt{T})$ | 投影步 |
+| Riemannian SGD | $O(nk^2)$ | $O(1/t)$ | 精确满足 |
+| Block power | $O(nkb)$ | $O(1/t^2)$ | 渐近满足 |
+
 **研究方向**：
 - 非凸在线优化的收敛性分析
 - 自适应步长的理论保证
 - 分布式流式PCA的通信复杂度下界
+- 带约束的在线矩阵分解（如非负、稀疏）
+- 量子算法加速的可能性
 
 ## 13.2 增量SVD算法深度剖析
 
@@ -83,6 +195,35 @@ $$\min_{\mathbf{U}\in\mathbb{R}^{n\times k}} \sum_{t=1}^T \ell_t(\mathbf{U}) = \
 4. 对$\mathbf{K}$进行SVD得到更新
 
 计算复杂度：$O(nk + k^3)$，远优于重新计算的$O(n^2k)$。
+
+**详细推导**：
+
+将$\mathbf{A}' = \mathbf{A} + \mathbf{c}\mathbf{d}^T$重写为：
+$$\mathbf{A}' = [\mathbf{U}, \mathbf{c}] \begin{bmatrix} \boldsymbol{\Sigma} & \mathbf{0} \\ \mathbf{0}^T & 1 \end{bmatrix} [\mathbf{V}, \mathbf{d}]^T$$
+
+但$[\mathbf{U}, \mathbf{c}]$和$[\mathbf{V}, \mathbf{d}]$可能不正交。通过正交化：
+
+$$[\mathbf{U}, \mathbf{c}] = [\mathbf{U}, \tilde{\mathbf{u}}]\begin{bmatrix} \mathbf{I} & \mathbf{p} \\ \mathbf{0}^T & \rho_c \end{bmatrix}$$
+
+其中$\tilde{\mathbf{u}} = \mathbf{r}_c/\|\mathbf{r}_c\|$，$\rho_c = \|\mathbf{r}_c\|$。
+
+**稳定性分析**：
+
+**定理13.3**：设$\kappa = \|\mathbf{c}\|\|\mathbf{d}\|/\sigma_{\min}(\mathbf{A})$，则相对误差满足：
+$$\frac{\|\tilde{\mathbf{A}}' - \mathbf{A}'\|_F}{\|\mathbf{A}'\|_F} \leq \epsilon_{\text{machine}} \cdot O(\kappa^2)$$
+
+这表明当更新幅度相对于最小奇异值过大时，算法可能不稳定。
+
+**特殊情况处理**：
+
+1. **当$\mathbf{r}_c \approx 0$或$\mathbf{r}_d \approx 0$**：
+   - 更新在现有子空间内
+   - 仅更新$\boldsymbol{\Sigma}$，不改变$\mathbf{U}, \mathbf{V}$
+   - 避免不必要的秩增加
+
+2. **当$\mathbf{A}$不是满秩时**：
+   - 需要特殊处理零奇异值
+   - 使用伪逆或正则化技术
 
 ### 13.2.2 Brand算法及其稳定化
 
@@ -103,6 +244,76 @@ $$\min_{\mathbf{U}\in\mathbb{R}^{n\times k}} \sum_{t=1}^T \ell_t(\mathbf{U}) = \
 - 迭代refinement技术
 - 基于条件数的自适应重计算
 
+**完整的Brand算法实现细节**：
+
+```
+function updateSVD(U, Σ, V, c):
+    // 步骤1: 投影到当前子空间
+    m = Uᵀc
+    p = c - Um
+    ρ = ‖p‖
+    
+    // 步骤2: 判断是否需要扩展秩
+    if ρ > ε_threshold:
+        // 步骤3a: 构造扩展矩阵
+        P = p/ρ  // 归一化
+        Q = zeros(k+1, 1)
+        Q[k+1] = 1
+        
+        // 构造(k+1)×(k+1)矩阵
+        K = [Σ  m]
+            [0  ρ]
+            
+        // 步骤4a: 对K进行SVD
+        [U', Σ', V'] = svd(K)
+        
+        // 步骤5a: 更新大矩阵
+        U_new = [U P] @ U'
+        V_new = [V Q] @ V'
+        Σ_new = Σ'
+    else:
+        // 步骤3b: 仅更新系数
+        K = Σ + m*1ᵀ  // 秩一更新
+        [U', Σ', V'] = svd(K)
+        U_new = U @ U'
+        V_new = V @ V'
+        Σ_new = Σ'
+    
+    return U_new, Σ_new, V_new
+```
+
+**正交化策略比较**：
+
+1. **修正Gram-Schmidt (MGS)**
+   - 优点：在线更新，内存高效
+   - 缺点：数值稳定性较差
+   - 适用：中等精度要求
+
+2. **Householder变换**
+   - 优点：数值稳定性最佳
+   - 缺点：计算量大，不易并行
+   - 适用：高精度要求
+
+3. **快速Givens旋转**
+   - 优点：局部更新，适合稀疏
+   - 缺点：串行性质
+   - 适用：特定结构
+
+**自适应重正交化**：
+
+```
+function checkOrthogonality(U):
+    orth_error = ‖UᵀU - I‖_F
+    if orth_error > ε_reorth:
+        U = reorthogonalize(U)
+    return U
+```
+
+重正交化时机：
+- 每隔$O(1/\epsilon_{\text{machine}})$次更新
+- 当正交性误差超过阈值
+- 在秩截断操作后
+
 ### 13.2.3 高阶更新：块算法
 
 对于批量更新$\mathbf{A}' = \mathbf{A} + \mathbf{C}\mathbf{D}^T$（$\mathbf{C}, \mathbf{D} \in \mathbb{R}^{n \times b}$）：
@@ -113,6 +324,62 @@ $$\mathbf{A}' = \begin{bmatrix} \mathbf{U} & \tilde{\mathbf{U}} \end{bmatrix} \t
 其中$\tilde{\mathbf{U}}, \tilde{\mathbf{V}}$来自$\mathbf{C}, \mathbf{D}$的QR分解。
 
 这在处理mini-batch更新时特别高效。
+
+**块更新算法详解**：
+
+```
+function blockUpdateSVD(U, Σ, V, C, D):
+    // 步骤1: QR分解输入矩阵
+    [Q_C, R_C] = qr(C - U(UᵀC))  // 正交化C
+    [Q_D, R_D] = qr(D - V(VᵀD))  // 正交化D
+    
+    // 步骤2: 构造扩展矩阵
+    K = [Σ      UᵀC]
+        [VᵀD    R_C @ R_Dᵀ]
+    
+    // 步骤3: 对K进行SVD (size: (k+b)×(k+b))
+    [U_K, Σ_K, V_K] = svd(K)
+    
+    // 步骤4: 更新原始矩阵
+    U_new = [U, Q_C] @ U_K
+    V_new = [V, Q_D] @ V_K
+    Σ_new = Σ_K
+    
+    // 步骤5: 可选秩截断
+    if rank(Σ_new) > k_max:
+        [U_new, Σ_new, V_new] = truncate(U_new, Σ_new, V_new, k_max)
+    
+    return U_new, Σ_new, V_new
+```
+
+**效率分析**：
+
+复杂度分解：
+- QR分解：$O(nb^2)$
+- 构造K矩阵：$O(kb + b^2)$
+- K的SVD：$O((k+b)^3)$
+- 矩阵乘法：$O(n(k+b)^2)$
+
+总复杂度：$O(nb^2 + n(k+b)^2 + (k+b)^3)$
+
+**与逐个更新的对比**：
+- 逐个更新$b$次：$O(nbk + bk^3)$
+- 块更新：$O(nb^2 + n(k+b)^2)$
+- 当$b \ll k$时，块更新显著更快
+
+**特殊块结构的优化**：
+
+1. **对称更新**：$\mathbf{A}' = \mathbf{A} + \mathbf{C}\mathbf{C}^T$
+   - 只需一次QR分解
+   - 保持对称性
+
+2. **低秩更新**：当$b \ll k$时
+   - 使用Sherman-Morrison-Woodbury公式
+   - 避免扩展到$(k+b) \times (k+b)$
+
+3. **稀疏更新**：当$\mathbf{C}, \mathbf{D}$稀疏时
+   - 利用稀疏性减少计算
+   - 特殊的索引结构
 
 ### 13.2.4 分布式增量SVD
 
@@ -132,10 +399,129 @@ $$\mathbf{A}' = \begin{bmatrix} \mathbf{U} & \tilde{\mathbf{U}} \end{bmatrix} \t
 - 通信与精度的权衡
 - 拜占庭节点的鲁棒性
 
+**分布式架构详解**：
+
+```
+// 节点i的本地算法
+function nodeUpdate(local_data_stream):
+    // 本地状态
+    U_local = []  // n×k_local
+    Σ_local = []  // k_local×k_local
+    buffer = []   // 数据缓冲
+    
+    while true:
+        // 阶段1: 本地处理
+        batch = collect_batch(local_data_stream)
+        U_local, Σ_local = incrementalSVD(U_local, Σ_local, batch)
+        
+        // 阶段2: 周期通信
+        if time_to_communicate():
+            // 发送本地子空间的紧凑表示
+            sketch = compute_sketch(U_local, Σ_local)
+            broadcast(sketch)
+            
+            // 接收其他节点的sketch
+            sketches = receive_all()
+            
+            // 阶段3: 子空间对齐
+            U_global = align_subspaces(sketches)
+            
+            // 阶段4: 本地投影更新
+            U_local = project_to_global(U_local, U_global)
+```
+
+**子空间对齐算法**：
+
+**方法1：Grassmannian平均**
+```
+function align_subspaces(U_list):
+    // 计算Grassmannian重心
+    U_mean = grassmannian_mean(U_list)
+    return U_mean
+    
+function grassmannian_mean(U_list):
+    // 迭代算法
+    U_avg = U_list[0]
+    for iter in 1:max_iters:
+        // 计算到各子空间的测地线
+        tangents = []
+        for U in U_list:
+            v = log_map(U_avg, U)
+            tangents.append(v)
+        
+        // 平均切向量
+        v_mean = mean(tangents)
+        
+        // 沿测地线更新
+        U_avg = exp_map(U_avg, v_mean)
+    return U_avg
+```
+
+**方法2：分布式特征分解**
+```
+function distributed_eigen_alignment():
+    // 构造分布式协方差矩阵
+    C_global = sum_all_nodes(U_local @ Σ_local² @ U_localᵀ)
+    
+    // 分布式特征分解
+    [V, Λ] = distributed_eig(C_global, k)
+    
+    return V[:, 1:k]
+```
+
+**通信优化技术**：
+
+1. **量化压缩**
+   ```
+   function quantize_subspace(U, bits):
+       // 随机旋转
+       R = random_orthogonal(k)
+       U_rot = U @ R
+       
+       // 量化
+       U_quant = quantize(U_rot, bits)
+       
+       return U_quant, R
+   ```
+
+2. **随机投影**
+   ```
+   function sketch_subspace(U, Σ, sketch_size):
+       // Johnson-Lindenstrauss投影
+       S = randn(n, sketch_size) / sqrt(sketch_size)
+       Y = Sᵀ @ U @ Σ
+       
+       return Y  // sketch_size × k
+   ```
+
+3. **分层通信**
+   - 频繁交换主要成分
+   - 稀疏交换次要成分
+   - 基于重要性的自适应频率
+
+**拜占庭鲁棒性**：
+
+```
+function byzantine_robust_aggregation(sketches, f):
+    // f = 拜占庭节点数量上界
+    
+    // 方法1: 中位数聚合
+    median_sketch = geometric_median(sketches)
+    
+    // 方法2: 修剪均值
+    distances = compute_distances(sketches)
+    good_nodes = trim_outliers(distances, f)
+    robust_mean = mean(sketches[good_nodes])
+    
+    return robust_mean
+```
+
 **研究方向**：
 - 基于草图的分布式SVD通信压缩
 - 去中心化共识SVD算法
 - 异构数据分布下的理论分析
+- 动态网络拓扑下的适应性算法
+- 差分隐私保护的分布式PCA
 
 ## 13.3 自适应秩选择
 
