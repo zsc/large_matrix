@@ -19,6 +19,14 @@ $$\mathcal{L}_t = \sum_{(i,j) \in \Omega_t} w_{ij}^{(t)} (r_{ij} - \mathbf{u}_i^
 - 平滑的权重衰减，避免突变
 - 参数 $\beta$ 具有明确的物理意义（半衰期 $t_{1/2} = \ln(2)/\beta$）
 - 与在线学习理论中的指数加权平均（EWA）相联系
+- 满足时间一致性：$w_{ij}^{(t+\Delta t)} = w_{ij}^{(t)} \cdot e^{-\beta\Delta t}$
+
+**数学性质分析**
+
+指数遗忘的有效样本量（Effective Sample Size, ESS）：
+$$\text{ESS}_t = \frac{\left(\sum_{s=1}^t e^{-\beta(t-s)}\right)^2}{\sum_{s=1}^t e^{-2\beta(t-s)}} \approx \frac{1}{2\beta}$$
+
+这提供了选择 $\beta$ 的理论指导：若希望有效利用约 $N$ 个时间单位的历史数据，应设置 $\beta \approx 1/(2N)$。
 
 **滑动窗口方法**
 
@@ -32,6 +40,17 @@ $$w_{ij}^{(t)} = \begin{cases}
 $$w_{ij}^{(t)} = \sigma\left(\frac{W - (t - t_{ij})}{\tau}\right)$$
 其中 $\sigma$ 是sigmoid函数，$\tau$ 控制过渡的平滑度。
 
+**分段线性遗忘**
+
+介于指数和窗口之间的折中方案：
+$$w_{ij}^{(t)} = \begin{cases}
+1 & \text{if } t - t_{ij} \leq W_1 \\
+1 - \alpha(t - t_{ij} - W_1)/(W_2 - W_1) & \text{if } W_1 < t - t_{ij} \leq W_2 \\
+1 - \alpha & \text{if } t - t_{ij} > W_2
+\end{cases}$$
+
+这种方法保留近期数据的完整权重，对中期数据线性衰减，对远期数据保持最小权重。
+
 **自适应遗忘模型**
 
 更高级的方法是让遗忘率随数据特性动态调整：
@@ -41,6 +60,20 @@ $$\beta_{ij}(t) = \beta_0 \cdot f(\text{volatility}_i, \text{popularity}_j, \tex
 - $\text{volatility}_i$ 衡量用户兴趣的变化速度
 - $\text{popularity}_j$ 反映物品的流行度趋势
 - $\text{sparsity}_{ij}$ 考虑数据稀疏性
+
+**波动性估计**
+
+用户兴趣波动性可通过滑动窗口内的评分方差估计：
+$$\text{volatility}_i(t) = \sqrt{\frac{1}{|\mathcal{W}_i|} \sum_{(j,s) \in \mathcal{W}_i} (r_{ij}^{(s)} - \bar{r}_i^{(t)})^2}$$
+
+其中 $\mathcal{W}_i$ 是用户 $i$ 在时间窗口内的交互集合。
+
+**多尺度遗忘**
+
+实际系统中，不同时间尺度的模式共存：
+$$w_{ij}^{(t)} = \sum_{k=1}^K \alpha_k \exp(-\beta_k(t - t_{ij}))$$
+
+其中 $\sum_k \alpha_k = 1$，不同的 $\beta_k$ 对应不同时间尺度（小时、天、周、月）。
 
 ### 15.1.2 增量SGD的收敛性分析
 
@@ -60,6 +93,16 @@ $$\mathbf{v}_{j_t} \leftarrow \mathbf{v}_{j_t} - \eta_t \nabla_{\mathbf{v}_{j_t}
 则增量SGD收敛到稳定点的速率为：
 $$\mathbb{E}\left[\frac{1}{T}\sum_{t=1}^T \|\nabla \mathcal{L}_t\|^2\right] = O\left(\frac{1}{\sqrt{T}}\right)$$
 
+**改进的收敛性分析**
+
+考虑矩阵分解的特殊结构，可以得到更紧的界。定义 Lyapunov 函数：
+$$V_t = \|\mathbf{U}_t - \mathbf{U}^*\|_F^2 + \|\mathbf{V}_t - \mathbf{V}^*\|_F^2$$
+
+在适当的步长条件下：
+$$\mathbb{E}[V_T] \leq \frac{V_0}{T^\alpha} + O\left(\frac{\sigma^2}{T^{1-\alpha}}\right)$$
+
+其中 $\alpha \in (0.5, 1)$ 取决于问题的强凸性程度，$\sigma^2$ 是噪声方差。
+
 **带遗忘的SGD分析**
 
 考虑指数遗忘权重，修正的更新规则变为：
@@ -67,11 +110,35 @@ $$\mathbf{u}_{i_t} \leftarrow (1-\gamma)\mathbf{u}_{i_t} - \eta_t e^{-\beta(t-t_
 
 其中 $\gamma$ 是衰减因子，防止历史信息完全主导。
 
+**追踪误差分析**
+
+在非平稳环境下，定义追踪误差：
+$$\text{TE}_T = \frac{1}{T}\sum_{t=1}^T \|\mathbf{U}_t\mathbf{V}_t^T - \mathbf{M}_t^*\|_F^2$$
+
+其中 $\mathbf{M}_t^*$ 是时刻 $t$ 的真实矩阵。可以证明：
+$$\mathbb{E}[\text{TE}_T] \leq O\left(\frac{1}{\sqrt{T}}\right) + O(\beta) + O(\Delta_T)$$
+
+其中 $\Delta_T$ 衡量环境变化速度。这表明遗忘率 $\beta$ 需要在适应性和稳定性之间权衡。
+
+**方差减少技术**
+
+为了加速收敛，可以使用方差减少的SGD变体：
+
+1. **SVRG-style更新**：
+   $$\mathbf{g}_t = \nabla \ell_t(\mathbf{u}_t) - \nabla \ell_t(\tilde{\mathbf{u}}) + \tilde{\mathbf{g}}$$
+   其中 $\tilde{\mathbf{u}}$ 是快照点，$\tilde{\mathbf{g}}$ 是在快照点的完整梯度。
+
+2. **动量方法**：
+   $$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1-\beta_1)\nabla \ell_t$$
+   $$\mathbf{u}_t = \mathbf{u}_{t-1} - \eta_t \mathbf{m}_t$$
+
 **关键研究方向**：
 - 非凸优化的在线regret界（特别是矩阵分解的低秩约束）
 - 自适应学习率（AdaGrad、Adam）在矩阵分解中的理论保证
 - 稀疏数据流下的样本复杂度
 - 时变环境下的追踪误差（tracking error）分析
+- 分布式环境下的通信复杂度优化
+- 隐私保护约束下的收敛性（差分隐私SGD）
 
 ### 15.1.3 动态正则化策略
 
@@ -88,6 +155,16 @@ $$\lambda_i^{(t)} = \lambda_0 / \sqrt{n_i^{(t)} + 1}$$
 - 后验精度随观测数增加：$\text{precision} \propto n_i^{(t)}$
 - 等价于自适应正则化
 
+更精确地，后验分布为：
+$$p(\mathbf{u}_i | \mathcal{D}_i) \propto \exp\left(-\frac{1}{2\sigma^2}\|\mathbf{u}_i\|^2 - \frac{1}{2\sigma_r^2}\sum_{j \in \mathcal{D}_i}(r_{ij} - \mathbf{u}_i^T\mathbf{v}_j)^2\right)$$
+
+**泛化误差界**
+
+动态正则化的泛化性能可以通过PAC-Bayes理论分析：
+$$\mathbb{E}[\mathcal{L}_{\text{test}}] \leq \mathcal{L}_{\text{train}} + O\left(\sqrt{\frac{\text{KL}(q\|p) + \log(1/\delta)}{n}}\right)$$
+
+其中 KL 散度项受正则化控制。
+
 **多尺度正则化**
 
 考虑不同时间尺度的行为：
@@ -97,11 +174,27 @@ $$\lambda_i^{(t)} = \lambda_{\text{long}} / \sqrt{n_i^{\text{all}}} + \lambda_{\
 - $n_i^{\text{all}}$ 是历史总交互数
 - $n_i^{\text{recent}}$ 是近期（如最近7天）交互数
 
+**信息论视角**
+
+从最小描述长度（MDL）原理，最优正则化应平衡模型复杂度和数据拟合：
+$$\text{MDL} = -\log p(\mathcal{D}|\mathbf{u}_i) + \text{KL}(\mathbf{u}_i \| \mathbf{u}_{\text{prior}})$$
+
+这导出自适应正则化：
+$$\lambda_i^{(t)} = \frac{\sigma_r^2}{\sigma^2} \cdot \frac{1}{n_i^{(t)}}$$
+
+**稀疏感知正则化**
+
+对于极稀疏用户，标准正则化可能过强。一种改进是：
+$$\lambda_i^{(t)} = \lambda_0 \cdot \left(\frac{n_{\text{median}}}{n_i^{(t)} + n_{\text{median}}}\right)^\alpha$$
+
+其中 $n_{\text{median}}$ 是中位数交互次数，$\alpha \in [0.5, 1]$ 控制调整强度。
+
 **数值稳定性考虑**：
 - 防止除零错误：使用 $n_i^{(t)} + \epsilon$，$\epsilon \sim 0.1$
 - 正则化参数的上下界限制：$\lambda_{\min} \leq \lambda_i^{(t)} \leq \lambda_{\max}$
 - 增量统计量的精确维护：使用Welford算法计算在线均值和方差
 - 数值下溢处理：对极小的正则化值使用对数空间计算
+- 条件数监控：确保 $\kappa(\mathbf{A}_i) < \kappa_{\max}$
 
 ### 15.1.4 混合遗忘策略
 
@@ -113,6 +206,13 @@ $$w_{ij}^{(t)} = \alpha \cdot w_{\text{exp}}^{(t)} + (1-\alpha) \cdot w_{\text{w
 其中 $\alpha$ 可以自适应调整：
 $$\alpha(t) = \sigma\left(\frac{\text{MSE}_{\text{exp}} - \text{MSE}_{\text{window}}}{\tau}\right)$$
 
+**在线模型选择**
+
+使用专家算法（Multiplicative Weights）动态选择最佳遗忘策略：
+$$p_k^{(t+1)} = \frac{p_k^{(t)} \exp(-\eta L_k^{(t)})}{\sum_{k'} p_{k'}^{(t)} \exp(-\eta L_{k'}^{(t)})}$$
+
+其中 $L_k^{(t)}$ 是策略 $k$ 的累积损失，$p_k^{(t)}$ 是选择概率。
+
 **事件驱动遗忘**
 
 某些事件（如节假日、促销）会导致用户行为突变：
@@ -122,10 +222,54 @@ $$\beta(t) = \begin{cases}
 \beta_{\text{recovery}} & \text{事件后恢复期}
 \end{cases}$$
 
+**变点检测算法**
+
+使用贝叶斯在线变点检测（BOCD）：
+$$p(r_t | r_{1:t-1}) = \sum_{\tau} p(r_t | r_{\tau:t-1}) p(\tau | r_{1:t-1})$$
+
+其中 $\tau$ 是最近变点的位置。
+
 **研究挑战**：
 - 自动检测行为模式变化点
 - 多用户群体的差异化遗忘策略
 - 遗忘机制与推荐多样性的关系
+- 对抗性环境下的鲁棒遗忘
+
+### 15.1.5 理论保证与优化界
+
+**竞争比分析**
+
+定义在线算法的竞争比：
+$$\rho = \sup_{\text{sequence}} \frac{\text{ALG}_{\text{online}}}{\text{OPT}_{\text{offline}}}$$
+
+对于指数遗忘的在线矩阵分解：
+$$\rho \leq 1 + O(\sqrt{\beta T})$$
+
+这表明遗忘率 $\beta$ 不能太大。
+
+**Regret界**
+
+考虑与最佳固定遗忘率的比较：
+$$R_T = \sum_{t=1}^T \ell_t^{\beta_t} - \min_{\beta^*} \sum_{t=1}^T \ell_t^{\beta^*}$$
+
+使用在线镜像下降可得：
+$$R_T \leq O(\sqrt{T \log K})$$
+
+其中 $K$ 是候选遗忘率的数量。
+
+**样本复杂度**
+
+达到 $\epsilon$-近似解需要的样本数：
+$$m = O\left(\frac{r(n_1 + n_2)\log(1/\epsilon)}{\epsilon^2} \cdot \frac{1}{1-e^{-\beta T}}\right)$$
+
+遗忘机制增加了有效样本复杂度。
+
+**计算-统计权衡**
+
+定义计算预算约束下的近似误差：
+$$\text{Error}(T, B) = \underbrace{O(1/\sqrt{T})}_{\text{统计误差}} + \underbrace{O(B^{-\gamma})}_{\text{计算误差}}$$
+
+其中 $B$ 是计算预算，$\gamma$ 取决于算法效率。
 
 ## 15.2 用户/物品嵌入的快速更新
 
@@ -146,12 +290,29 @@ $$(\mathbf{A}')^{-1} = \mathbf{A}^{-1} - \frac{\mathbf{A}^{-1}\mathbf{x}\mathbf{
 $$(\mathbf{A}')^{-1} = \mathbf{A}^{-1} - \frac{\mathbf{u}\mathbf{u}^T}{1 + \|\mathbf{u}\|^2}$$
 其中 $\mathbf{u} = \mathbf{A}^{-1/2}\mathbf{x}$
 
+**基于Cholesky分解的稳定实现**
+
+维护Cholesky分解 $\mathbf{A} = \mathbf{L}\mathbf{L}^T$，更新过程：
+1. 求解 $\mathbf{L}\mathbf{w} = \mathbf{x}$，得到 $\mathbf{w}$
+2. 计算 $\alpha = \sqrt{1 + \|\mathbf{w}\|^2}$
+3. 更新 $\mathbf{L}' = \begin{bmatrix} \mathbf{L} & \mathbf{0} \\ \mathbf{w}^T & \alpha \end{bmatrix}$
+
+这种方法数值稳定且保持正定性。
+
 **删除操作的处理**
 
 当需要删除旧数据（遗忘）时，使用减法版本：
 $$(\mathbf{A} - \mathbf{x}\mathbf{x}^T)^{-1} = \mathbf{A}^{-1} + \frac{\mathbf{A}^{-1}\mathbf{x}\mathbf{x}^T\mathbf{A}^{-1}}{1 - \mathbf{x}^T\mathbf{A}^{-1}\mathbf{x}}$$
 
 注意：需要检查 $\mathbf{x}^T\mathbf{A}^{-1}\mathbf{x} < 1$ 以保证正定性。
+
+**加权更新扩展**
+
+对于带时间权重的更新：
+$$\mathbf{A}' = \mathbf{A} + w_t \mathbf{x}\mathbf{x}^T$$
+
+修正的Sherman-Morrison公式：
+$$(\mathbf{A}')^{-1} = \mathbf{A}^{-1} - \frac{w_t \mathbf{A}^{-1}\mathbf{x}\mathbf{x}^T\mathbf{A}^{-1}}{1 + w_t \mathbf{x}^T\mathbf{A}^{-1}\mathbf{x}}$$
 
 **应用于矩阵分解**
 
@@ -162,6 +323,23 @@ $$\mathbf{u}_i = (\mathbf{V}_{\Omega_i}^T\mathbf{V}_{\Omega_i} + \lambda\mathbf{
 1. $\mathbf{A}_i' = \mathbf{A}_i + \mathbf{v}_j\mathbf{v}_j^T$
 2. $\mathbf{b}_i' = \mathbf{b}_i + r_{ij}\mathbf{v}_j$
 3. $\mathbf{u}_i' = (\mathbf{A}_i')^{-1}\mathbf{b}_i'$
+
+**误差累积分析**
+
+经过 $k$ 次更新后的误差界：
+$$\|(\mathbf{A}_k)^{-1} - (\mathbf{A}_k)^{-1}_{\text{exact}}\|_F \leq k \epsilon_{\text{machine}} \kappa(\mathbf{A}_0)^2$$
+
+建议每 $O(1/\epsilon_{\text{machine}})$ 次更新后重新计算精确逆。
+
+**缓存友好的实现**
+
+为了优化缓存性能，使用分块更新：
+```
+BlockSize = 32  // L1 cache line
+for block in blocks:
+    prefetch(A_inv[block])
+    update(A_inv[block])
+```
 
 ### 15.2.2 块更新与并行化
 
@@ -176,6 +354,14 @@ $$(\mathbf{A} + \mathbf{U}\mathbf{C}\mathbf{V}^T)^{-1} = \mathbf{A}^{-1} - \math
 - $\mathbf{V} = \mathbf{U}$
 
 复杂度：$O(r^2k + k^3)$，当 $k \ll r$ 时高效。
+
+**优化的Woodbury实现**
+
+为避免数值不稳定，使用QR分解：
+1. 计算 $\mathbf{Q}\mathbf{R} = \mathbf{A}^{-1/2}\mathbf{U}$
+2. 形成 $\mathbf{S} = \mathbf{C}^{-1} + \mathbf{R}^T\mathbf{R}$
+3. Cholesky分解 $\mathbf{S} = \mathbf{L}_S\mathbf{L}_S^T$
+4. 更新 $(\mathbf{A}')^{-1} = \mathbf{A}^{-1} - \mathbf{Q}(\mathbf{L}_S^{-T}\mathbf{L}_S^{-1})\mathbf{Q}^T$
 
 **并行化策略**
 
@@ -194,11 +380,41 @@ $$(\mathbf{A} + \mathbf{U}\mathbf{C}\mathbf{V}^T)^{-1} = \mathbf{A}^{-1} - \math
    - Stage 2: 计算矩阵更新
    - Stage 3: 更新嵌入向量
 
+**细粒度并行优化**
+
+使用原子操作避免锁：
+```
+atomic_add(A[i,j], delta)
+memory_fence()
+atomic_add(b[i], r * v[j])
+```
+
+**NUMA感知的数据布局**
+
+在多处理器系统中：
+```
+UserData {
+    A_inv: aligned to NUMA node
+    embeddings: interleaved across nodes
+    update_queue: per-node queue
+}
+```
+
+**批大小的自适应调整**
+
+根据系统负载动态调整：
+$$k_{\text{opt}} = \arg\min_k \left(\frac{T_{\text{collect}}(k)}{k} + T_{\text{compute}}(k)\right)$$
+
+其中：
+- $T_{\text{collect}}(k)$ 是收集 $k$ 个更新的时间
+- $T_{\text{compute}}(k) = O(r^2k + k^3)$ 是计算时间
+
 **实现要点**：
 - 缓存 $\mathbf{A}^{-1}$ 的分解形式（如Cholesky）
 - 异步更新的一致性保证：使用版本控制
 - 数值误差累积的定期修正：每 $N$ 次更新后重新计算
 - 内存局部性优化：按用户分组存储相关矩阵
+- 使用内存池减少分配开销
 
 ### 15.2.3 懒惰求值与缓存策略
 
@@ -241,6 +457,24 @@ $$\text{should\_update} = \frac{\text{staleness} \times \text{importance}}{\text
 - $\text{importance} = f(\text{access\_frequency}, \text{user\_value})$
 - $\text{update\_cost}$ 考虑计算复杂度和当前负载
 
+**成本模型**
+
+更精确的更新成本估计：
+$$\text{cost}(i) = c_{\text{compute}} \cdot |\Omega_i| + c_{\text{memory}} \cdot r^2 + c_{\text{sync}}$$
+
+其中：
+- $c_{\text{compute}}$ 是每个样本的计算成本
+- $c_{\text{memory}}$ 是内存访问成本
+- $c_{\text{sync}}$ 是同步开销
+
+**LRU-K缓存策略**
+
+考虑访问模式的时间局部性：
+```
+access_score(i) = Σ_{k=1}^K w_k * time_since_kth_access(i)
+evict_score(i) = staleness(i) / access_score(i)
+```
+
 **版本化缓存**
 
 支持多版本读取，避免更新阻塞查询：
@@ -251,11 +485,29 @@ VersionedEmbedding {
 }
 ```
 
+**近似更新理论**
+
+定义近似因子 $\alpha$：
+$$\mathbf{u}_{\text{approx}} = \alpha \mathbf{u}_{\text{old}} + (1-\alpha) \mathbf{u}_{\text{increment}}$$
+
+误差界：
+$$\|\mathbf{u}_{\text{approx}} - \mathbf{u}_{\text{exact}}\| \leq \frac{\alpha}{1-\alpha} \cdot \|\Delta \mathbf{u}\|$$
+
+**分层缓存架构**
+
+1. **L1缓存**：最热的嵌入，完全在内存
+2. **L2缓存**：SSD存储，毫秒级访问
+3. **L3存储**：分布式存储，用于冷数据
+
+缓存提升决策：
+$$\text{promote}(i) = \frac{\text{access\_rate}(i) \times \text{value}(i)}{\text{size}(i)} > \tau_{\text{level}}$$
+
 **研究线索**：
 - 缓存命中率与推荐质量的权衡
 - 分布式环境下的缓存一致性（使用Raft或Paxos）
 - 近似更新的误差界：$\|\mathbf{u}_{\text{approx}} - \mathbf{u}_{\text{exact}}\| \leq \epsilon$
 - 自适应缓存大小：基于内存压力和访问模式
+- 机器学习预测的缓存预取
 
 ### 15.2.4 增量矩阵分解的并行算法
 
@@ -271,12 +523,38 @@ AtomicUpdate(user_id, item_id, rating):
             break
 ```
 
+**Compare-And-Swap优化**
+
+使用双重检查减少CAS失败：
+```
+FastUpdate(user_id, item_id, rating):
+    expected = load(version[user_id])
+    new_A = compute_update(...)
+    if load(version[user_id]) == expected:
+        if CAS(A[user_id], old_A, new_A):
+            increment(version[user_id])
+```
+
 **异步SGD的理论保证**
 
 在延迟 $\tau$ 有界的情况下：
 $$\mathbb{E}[\|\mathbf{u}_T - \mathbf{u}^*\|^2] \leq O\left(\frac{1}{\sqrt{T}} + \frac{\tau}{T}\right)$$
 
 这表明适度的异步不会显著影响收敛性。
+
+**Hogwild!算法分析**
+
+对于稀疏数据，无锁并行SGD的收敛速率：
+$$\mathbb{E}[\mathcal{L}_T] - \mathcal{L}^* \leq O\left(\frac{L\sigma^2}{T} + \frac{L^2\tau^2\sigma^2}{T^2}\right)$$
+
+其中 $L$ 是Lipschitz常数，$\sigma^2$ 是梯度方差。
+
+**延迟补偿机制**
+
+考虑梯度延迟的影响：
+$$\mathbf{g}_{\text{comp}} = \mathbf{g}_t + \sum_{s=t-\tau}^{t-1} \mathbf{H}_s (\mathbf{w}_s - \mathbf{w}_{t-\tau-1})$$
+
+其中 $\mathbf{H}_s$ 是Hessian近似。
 
 **分布式快照**
 
@@ -287,6 +565,74 @@ $$\mathbb{E}[\|\mathbf{u}_T - \mathbf{u}^*\|^2] \leq O\left(\frac{1}{\sqrt{T}} +
 4. 组合形成全局一致状态
 
 这允许在不停止系统的情况下进行checkpoint和恢复。
+
+**向量时钟同步**
+
+维护因果一致性：
+```
+VectorClock {
+    clocks: Map<NodeId, LogicalTime>
+    
+    update(node_id):
+        clocks[node_id] += 1
+    
+    merge(other: VectorClock):
+        for (id, time) in other.clocks:
+            clocks[id] = max(clocks[id], time)
+}
+```
+
+### 15.2.5 分布式环境下的一致性保证
+
+**最终一致性模型**
+
+定义收敛条件：
+$$\lim_{t \to \infty} \mathbb{E}[\|\mathbf{U}_i^{(t)} - \mathbf{U}_j^{(t)}\|_F] = 0$$
+
+对所有节点 $i, j$。
+
+**参数服务器架构**
+
+1. **同步协议**：
+   - Pull: $\mathbf{u}_i^{\text{local}} \leftarrow \text{PS}.\text{get}(i)$
+   - Compute: $\Delta \mathbf{u}_i = -\eta \nabla \ell(\mathbf{u}_i^{\text{local}})$
+   - Push: $\text{PS}.\text{update}(i, \Delta \mathbf{u}_i)$
+
+2. **一致性级别**：
+   - 强一致性：所有更新序列化
+   - 有界陈旧性：$|\text{version}_i - \text{version}_j| \leq B$
+   - 最终一致性：无同步保证
+
+**冲突解决策略**
+
+当多个节点同时更新同一嵌入：
+1. **Last-Writer-Wins**：基于时间戳
+2. **CRDT**（无冲突复制数据类型）：
+   $$\mathbf{u}_{\text{merged}} = \frac{1}{|\mathcal{N}|} \sum_{n \in \mathcal{N}} \mathbf{u}_n$$
+3. **加权平均**：基于更新质量
+   $$\mathbf{u}_{\text{merged}} = \frac{\sum_n w_n \mathbf{u}_n}{\sum_n w_n}$$
+
+**通信优化**
+
+1. **梯度压缩**：
+   - Top-k稀疏化：只传输最大的 $k$ 个梯度分量
+   - 量化：使用低精度表示
+   - 误差反馈：累积压缩误差
+
+2. **异步通信**：
+   ```
+   async_push(gradient):
+       compressed = compress(gradient)
+       future = send_async(compressed)
+       error_buffer += gradient - decompress(compressed)
+   ```
+
+**理论保证**
+
+分布式SGD的收敛速率：
+$$\mathbb{E}[\|\nabla \mathcal{L}_T\|^2] \leq O\left(\frac{1}{\sqrt{nT}} + \frac{\sigma^2}{nT} + \frac{G^2\tau^2}{T^2}\right)$$
+
+其中 $n$ 是节点数，展示了线性加速直到通信瓶颈。
 
 ## 15.3 冷启动问题的矩阵补全视角
 
