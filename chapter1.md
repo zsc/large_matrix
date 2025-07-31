@@ -14,12 +14,42 @@ $$f(\mathbf{w} + \Delta\mathbf{w}) \approx f(\mathbf{w}) + \nabla f(\mathbf{w})^
 
 **Newton法**：直接使用Hessian矩阵 $\mathbf{H} = \nabla^2 f(\mathbf{w})$
 
+二次模型：$m_N(\Delta\mathbf{w}) = f(\mathbf{w}) + \nabla f(\mathbf{w})^T \Delta\mathbf{w} + \frac{1}{2} \Delta\mathbf{w}^T \nabla^2 f(\mathbf{w}) \Delta\mathbf{w}$
+
+更新规则：$\Delta\mathbf{w} = -[\nabla^2 f(\mathbf{w})]^{-1} \nabla f(\mathbf{w})$
+
 **Gauss-Newton法**：对于最小二乘问题 $f(\mathbf{w}) = \frac{1}{2}\|\mathbf{r}(\mathbf{w})\|^2$，使用一阶近似
-$$\mathbf{H}_{GN} = \mathbf{J}^T\mathbf{J}$$
+
+完整Hessian：$\nabla^2 f(\mathbf{w}) = \mathbf{J}^T\mathbf{J} + \sum_{i=1}^m r_i(\mathbf{w})\nabla^2 r_i(\mathbf{w})$
+
+Gauss-Newton近似：$\mathbf{H}_{GN} = \mathbf{J}^T\mathbf{J}$（忽略二阶项）
+
 其中 $\mathbf{J} = \nabla \mathbf{r}(\mathbf{w})$ 是残差的Jacobian矩阵。
 
 **Natural Gradient**：从信息几何角度，使用Fisher信息矩阵
-$$\mathbf{F} = \mathbb{E}_{p(\mathbf{x}|\mathbf{w})}[\nabla \log p(\mathbf{x}|\mathbf{w}) \nabla \log p(\mathbf{x}|\mathbf{w})^T]$$
+
+参数空间的Riemannian度量：$ds^2 = \mathbf{d}\mathbf{w}^T \mathbf{F}(\mathbf{w}) \mathbf{d}\mathbf{w}$
+
+Fisher信息矩阵：$\mathbf{F} = \mathbb{E}_{p(\mathbf{x}|\mathbf{w})}[\nabla \log p(\mathbf{x}|\mathbf{w}) \nabla \log p(\mathbf{x}|\mathbf{w})^T]$
+
+Natural gradient：$\tilde{\nabla}f(\mathbf{w}) = \mathbf{F}^{-1}(\mathbf{w})\nabla f(\mathbf{w})$
+
+**几何解释的深化**：
+
+1. **欧氏空间 vs 统计流形**：
+   - Newton法：假设参数空间是平坦的欧氏空间
+   - Natural Gradient：考虑参数化引起的流形弯曲
+   - 度量张量：$g_{ij}(\mathbf{w}) = \mathbb{E}[\partial_i \ell(\mathbf{x};\mathbf{w}) \partial_j \ell(\mathbf{x};\mathbf{w})]$
+
+2. **KL散度的二阶近似**：
+   $$D_{KL}(p(\cdot|\mathbf{w})||p(\cdot|\mathbf{w}+\Delta\mathbf{w})) \approx \frac{1}{2}\Delta\mathbf{w}^T\mathbf{F}(\mathbf{w})\Delta\mathbf{w}$$
+   
+   这解释了为什么Natural Gradient在概率模型中特别有效。
+
+3. **坐标变换的不变性**：
+   - Newton法：对仿射变换不变
+   - Natural Gradient：对任意可微同胚参数化不变
+   - 实践意义：对网络参数的重新缩放具有鲁棒性
 
 ### 1.1.2 数学等价性的条件
 
@@ -30,6 +60,34 @@ $$\mathbf{F} = \mathbb{E}_{p(\mathbf{x}|\mathbf{w})}[\nabla \log p(\mathbf{x}|\m
 1. 对于负对数似然 $f(\mathbf{w}) = -\log p(\mathbf{y}|\mathbf{x}, \mathbf{w})$
 2. 在最优解处，期望Hessian等于Fisher信息矩阵（Bartlett恒等式）
 3. Gauss-Newton忽略的二阶项在最优解处为零
+
+**更深入的等价性分析**：
+
+**定理 1.1a**（广义线性模型中的精确等价）
+对于广义线性模型(GLM)，若链接函数是canonical的，则：
+$$\mathbf{H}_{GN} = \mathbf{X}^T\mathbf{W}\mathbf{X} = \mathbf{F}$$
+其中 $\mathbf{W} = \text{diag}(w_1, ..., w_n)$ 是权重矩阵。
+
+**定理 1.1b**（深度网络中的近似等价）
+在宽度趋于无穷的神经网络中，输出层的Gauss-Newton矩阵收敛到Neural Tangent Kernel (NTK)：
+$$\lim_{m \to \infty} \mathbf{H}_{GN} = \mathbf{K}_{NTK}$$
+
+**等价性破坏的情形**：
+
+1. **模型误设(Model Misspecification)**：
+   - 真实数据分布 $q(\mathbf{x})$ 不在模型族 $\{p(\mathbf{x}|\mathbf{w})\}$ 中
+   - 此时 $\mathbf{F} \neq \mathbb{E}[\nabla^2 \ell]$，等价性不成立
+   - 实践建议：使用sandwich estimator校正
+
+2. **有限样本效应**：
+   - Empirical Fisher: $\hat{\mathbf{F}}_n = \frac{1}{n}\sum_{i=1}^n \mathbf{g}_i\mathbf{g}_i^T$
+   - 与期望Fisher的差异：$\|\hat{\mathbf{F}}_n - \mathbf{F}\| = O_p(n^{-1/2})$
+   - 小样本修正：使用bootstrap或jackknife估计
+
+3. **非渐近区域**：
+   - 远离最优解时，Gauss-Newton丢失的二阶项可能很大
+   - 量化：$\|\mathbf{H} - \mathbf{H}_{GN}\| \leq L\|\mathbf{r}(\mathbf{w})\|$
+   - 自适应策略：基于残差大小混合使用
 
 ### 1.1.3 实践中的统一框架
 
@@ -46,24 +104,48 @@ $$\mathbf{G}_k \Delta\mathbf{w}_k = -\nabla f(\mathbf{w}_k)$$
 
 这个统一框架的核心在于如何选择合适的预条件子 $\mathbf{G}_k$。关键考虑因素包括：
 
-1. **正定性保证**：确保 $\mathbf{G}_k \succ 0$ 以获得下降方向
-2. **条件数控制**：$\kappa(\mathbf{G}_k)$ 影响线性求解器的收敛速度
-3. **计算复杂度**：构造和求解 $\mathbf{G}_k$ 系统的代价
-4. **近似质量**：$\mathbf{G}_k$ 对真实曲率的近似程度
+1. **正定性保证**：
+   - 谱修正：$\mathbf{G}_k = \mathbf{U}\max(\mathbf{\Lambda}, \epsilon\mathbf{I})\mathbf{U}^T$
+   - 对角加载：$\mathbf{G}_k + \lambda\mathbf{I}$，其中 $\lambda > -\lambda_{\min}(\mathbf{G}_k)$
+   - Cholesky修正：尝试分解，失败时增加对角项
+
+2. **条件数控制**：
+   - 目标：$\kappa(\mathbf{G}_k) = \lambda_{\max}/\lambda_{\min} \leq \kappa_{\max}$
+   - 谱截断：将小特征值替换为阈值
+   - 预条件迭代法的收敛速度：$\rho \approx 1 - 2/(\sqrt{\kappa} + 1)$
+
+3. **计算复杂度**：
+   - 直接法：$O(n^3)$ for Cholesky分解
+   - 迭代法：$O(n^2k)$ for $k$ 次CG迭代
+   - 低秩方法：$O(nr^2)$ for 秩-$r$ 近似
+
+4. **近似质量**：
+   - 局部模型精度：$\|f(\mathbf{w}+\Delta\mathbf{w}) - m(\Delta\mathbf{w})\| \leq O(\|\Delta\mathbf{w}\|^3)$
+   - 曲率近似误差：$\|\mathbf{G}_k - \nabla^2 f\| \leq \epsilon_G$
+   - 收敛速度影响：超线性 vs 线性收敛
 
 **高级变体与扩展**：
 
-1. **Kronecker-Factored Curvature**：
+1. **Kronecker-Factored Curvature (K-FAC)**：
    $$\mathbf{G}_k = \mathbf{A}_k \otimes \mathbf{B}_k + \lambda\mathbf{I}$$
-   利用Kronecker积结构大幅降低存储和计算复杂度。
+   
+   优势分析：
+   - 存储：从 $O(n^2)$ 降至 $O(n)$
+   - 求逆：利用 $(\mathbf{A} \otimes \mathbf{B})^{-1} = \mathbf{A}^{-1} \otimes \mathbf{B}^{-1}$
+   - 近似质量：对具有Kronecker结构的网络是精确的
 
 2. **Quasi-Newton预条件**：
-   $$\mathbf{G}_k = \mathbf{B}_k \approx \nabla^2 f(\mathbf{w}_k)$$
-   其中 $\mathbf{B}_k$ 通过BFGS或L-BFGS更新维护。
+   $$\mathbf{B}_{k+1} = \mathbf{B}_k + \frac{\mathbf{y}_k\mathbf{y}_k^T}{\mathbf{y}_k^T\mathbf{s}_k} - \frac{\mathbf{B}_k\mathbf{s}_k\mathbf{s}_k^T\mathbf{B}_k}{\mathbf{s}_k^T\mathbf{B}_k\mathbf{s}_k}$$
+   
+   其中 $\mathbf{s}_k = \mathbf{w}_{k+1} - \mathbf{w}_k$, $\mathbf{y}_k = \nabla f_{k+1} - \nabla f_k$
 
 3. **Sketched Curvature**：
    $$\mathbf{G}_k = \mathbf{S}_k^T\nabla^2 f(\mathbf{w}_k)\mathbf{S}_k$$
-   使用随机投影 $\mathbf{S}_k$ 降维，保持主要曲率信息。
+   
+   随机投影选择：
+   - Gaussian sketching: $\mathbf{S}_{ij} \sim \mathcal{N}(0, 1/d)$
+   - Sparse embedding: 稀疏 $\{-1, 0, +1\}$ 矩阵
+   - Subsampled randomized Hadamard transform (SRHT)
 
 **自适应框架的数学基础**：
 
@@ -71,16 +153,53 @@ $$\mathbf{G}_k \Delta\mathbf{w}_k = -\nabla f(\mathbf{w}_k)$$
 $$\mathbf{G}_k = \sum_{i=1}^m \alpha_i^{(k)} \mathbf{G}_i^{(k)}$$
 
 其中权重 $\alpha_i^{(k)}$ 可通过以下方式确定：
-- **贝叶斯方法**：将不同曲率近似视为先验
-- **在线学习**：最小化历史预测误差的regret
-- **谱分析**：基于特征值分布选择权重
+
+1. **贝叶斯方法**：
+   - 先验：$p(\mathbf{G}) = \prod_i p(\mathbf{G}_i)^{\alpha_i}$
+   - 后验更新：基于观测的步长质量
+   - 计算：使用变分推断或MCMC
+
+2. **在线学习**：
+   - Regret最小化：$\min_{\alpha} \sum_{t=1}^T \ell_t(\alpha)$
+   - 专家算法：每个曲率矩阵作为一个专家
+   - 权重更新：指数权重或Follow-the-Leader
+
+3. **谱分析**：
+   - 特征值分解：$\mathbf{G}_i = \mathbf{U}_i\mathbf{\Lambda}_i\mathbf{U}_i^T$
+   - 权重选择：基于条件数、谱gap等指标
+   - 动态调整：追踪特征值变化
+
+**实现考虑与优化**：
+
+1. **数值稳定性技巧**：
+   ```
+   # 稳定的Cholesky分解
+   while True:
+       try:
+           L = cholesky(G + diag_shift * I)
+           break
+       except:
+           diag_shift *= 10
+   ```
+
+2. **高效线性求解**：
+   - 预条件共轭梯度(PCG)
+   - 多重网格方法
+   - 不完全分解预条件子
+
+3. **分布式实现**：
+   - 数据并行：分片计算梯度和曲率
+   - 模型并行：分块矩阵运算
+   - 通信优化：梯度压缩和延迟更新
 
 **研究线索**：
 - 自适应选择曲率矩阵的元学习方法
-- 结合不同曲率近似的混合算法
-- 在非凸优化中的收敛性保证
+- 结合不同曲率近似的混合算法理论分析
+- 在非凸优化中的收敛性保证强化
 - 基于硬件感知的曲率矩阵设计（GPU/TPU优化）
 - 分布式环境下的曲率矩阵近似与通信优化
+- 量子算法加速曲率矩阵计算的可能性
+- 神经架构搜索(NAS)中的二阶方法应用
 
 ## 1.2 Fisher信息矩阵与Hessian的关系
 
@@ -92,25 +211,146 @@ Fisher信息矩阵和Hessian之间存在深刻的数学联系，这种联系在�
 对于概率模型 $p(\mathbf{x}|\mathbf{w})$，负对数似然的期望Hessian等于Fisher信息矩阵：
 $$\mathbb{E}_{\mathbf{x} \sim p(\mathbf{x}|\mathbf{w})}[\nabla^2(-\log p(\mathbf{x}|\mathbf{w}))] = \mathbf{F}(\mathbf{w})$$
 
+**证明核心**：利用score function的性质
+$$\mathbb{E}[\nabla \log p(\mathbf{x}|\mathbf{w})] = 0$$
+$$\text{Var}[\nabla \log p(\mathbf{x}|\mathbf{w})] = \mathbf{F}(\mathbf{w})$$
+
+**深层联系的多个视角**：
+
+1. **信息几何视角**：
+   - Fisher信息定义了参数空间的Riemannian度量
+   - Hessian在该度量下是Levi-Civita联络的表示
+   - 测地线方程：$\ddot{\mathbf{w}}^k + \Gamma_{ij}^k \dot{\mathbf{w}}^i \dot{\mathbf{w}}^j = 0$
+
+2. **统计物理类比**：
+   - Fisher信息 ~ 系统的"刚度"（对扰动的响应）
+   - Hessian ~ 能量景观的局部曲率
+   - 温度参数连接两者：$\mathbf{H} = \beta\mathbf{F} + \text{涨落项}$
+
+3. **信息论解释**：
+   - Fisher信息量化参数的可辨识性
+   - Cramér-Rao界：$\text{Var}(\hat{\mathbf{w}}) \geq \mathbf{F}^{-1}$
+   - 效率：估计量接近此界的程度
+
+**推广到非标准情形**：
+
+**定理 1.2a**（加权Fisher信息）
+对于加权损失 $L(\mathbf{w}) = \mathbb{E}_{q(\mathbf{x})}[\ell(p(\mathbf{x}|\mathbf{w}))]$：
+$$\nabla^2 L(\mathbf{w}) = \mathbf{F}_q(\mathbf{w}) + \text{bias term}$$
+其中 $\mathbf{F}_q$ 是关于分布 $q$ 的加权Fisher信息。
+
+**定理 1.2b**（条件Fisher信息）
+对于条件模型 $p(\mathbf{y}|\mathbf{x}, \mathbf{w})$：
+$$\mathbf{F}_{cond} = \mathbb{E}_{\mathbf{x},\mathbf{y}}[\nabla_{\mathbf{w}} \log p(\mathbf{y}|\mathbf{x},\mathbf{w}) \nabla_{\mathbf{w}} \log p(\mathbf{y}|\mathbf{x},\mathbf{w})^T]$$
+
 ### 1.2.2 实际差异与近似策略
 
 尽管理论上存在联系，但在实践中二者常有显著差异：
 
-1. **有限样本效应**：实际Hessian包含数据相关的噪声
-2. **模型误设**：当模型不正确时，Fisher信息可能严重低估曲率
-3. **非凸性**：在非凸区域，Hessian可能有负特征值，而Fisher信息矩阵始终半正定
+1. **有限样本效应**：
+   - 样本Hessian：$\hat{\mathbf{H}}_n = \frac{1}{n}\sum_{i=1}^n \nabla^2 \ell_i(\mathbf{w})$
+   - 偏差：$\mathbb{E}[\hat{\mathbf{H}}_n] - \mathbf{F} = O(n^{-1})$
+   - 方差：$\text{Var}(\hat{\mathbf{H}}_n) = O(n^{-1})$
+   - 修正方法：Bartlett校正、Bootstrap方差估计
+
+2. **模型误设(Misspecification)**：
+   - 真实分布：$q(\mathbf{x})$ vs 模型族：$\{p(\mathbf{x}|\mathbf{w})\}$
+   - Sandwich估计量：$\mathbf{V} = \mathbf{H}^{-1}\mathbf{F}\mathbf{H}^{-1}$
+   - 稳健推断：使用$\mathbf{V}$而非$\mathbf{H}^{-1}$或$\mathbf{F}^{-1}$
+   - 诊断：比较$\|\mathbf{H} - \mathbf{F}\|$的大小
+
+3. **非凸性与负曲率**：
+   - Hessian谱：可能包含负特征值
+   - Fisher信息：始终半正定（$\mathbf{F} \succeq 0$）
+   - 修正策略：
+     * 谱截断：$\mathbf{H}^+ = \sum_{\lambda_i > 0} \lambda_i \mathbf{u}_i\mathbf{u}_i^T$
+     * 绝对值修正：$|\mathbf{H}| = \mathbf{U}|\mathbf{\Lambda}|\mathbf{U}^T$
+     * 凸组合：$\alpha\mathbf{H} + (1-\alpha)\mathbf{F}$
 
 **高级近似技术**：
-- Empirical Fisher: $\hat{\mathbf{F}} = \frac{1}{N}\sum_{i=1}^N \nabla \log p(\mathbf{x}_i|\mathbf{w}) \nabla \log p(\mathbf{x}_i|\mathbf{w})^T$
-- Generalized Gauss-Newton: 结合Fisher信息和Hessian的正定部分
-- Levenberg-Marquardt型阻尼: $\mathbf{G} = \mathbf{F} + \lambda\mathbf{I}$，自适应调整$\lambda$
+
+1. **Empirical Fisher变体**：
+   
+   **标准Empirical Fisher**：
+   $$\hat{\mathbf{F}} = \frac{1}{N}\sum_{i=1}^N \mathbf{g}_i\mathbf{g}_i^T, \quad \mathbf{g}_i = \nabla \log p(\mathbf{x}_i|\mathbf{w})$$
+   
+   **Centered Empirical Fisher**：
+   $$\hat{\mathbf{F}}_c = \frac{1}{N}\sum_{i=1}^N (\mathbf{g}_i - \bar{\mathbf{g}})(\mathbf{g}_i - \bar{\mathbf{g}})^T$$
+   
+   **Natural Empirical Fisher**（用于深度学习）：
+   $$\hat{\mathbf{F}}_{nat} = \frac{1}{N}\sum_{i=1}^N \nabla_{\mathbf{w}} \log p(\mathbf{y}_i|\mathbf{x}_i,\mathbf{w}) \nabla_{\mathbf{w}} \log p(\mathbf{y}_i|\mathbf{x}_i,\mathbf{w})^T$$
+
+2. **Generalized Gauss-Newton (GGN)**：
+   
+   对于复合损失 $L(\mathbf{w}) = \ell(f(\mathbf{w}))$：
+   $$\mathbf{G}_{GGN} = \mathbf{J}^T \nabla^2\ell(f(\mathbf{w})) \mathbf{J}$$
+   
+   特殊情况：
+   - 平方损失：$\mathbf{G}_{GGN} = \mathbf{J}^T\mathbf{J}$（标准Gauss-Newton）
+   - 交叉熵：$\mathbf{G}_{GGN} = \mathbf{J}^T\text{diag}(p(1-p))\mathbf{J}$
+
+3. **自适应混合策略**：
+   
+   **动态权重方案**：
+   $$\mathbf{G}_k = \alpha_k\mathbf{H}_k + (1-\alpha_k)\mathbf{F}_k$$
+   
+   权重选择准则：
+   - 基于条件数：$\alpha_k = \min(1, \kappa_{max}/\kappa(\mathbf{H}_k))$
+   - 基于进展：$\alpha_k = \rho_k$（实际vs预测下降比）
+   - 基于噪声水平：$\alpha_k = 1/(1 + \sigma_k^2)$
 
 ### 1.2.3 计算效率考虑
 
 Fisher信息矩阵的计算通常比完整Hessian更高效：
+
+**基础优势**：
 - 只需要一阶导数（通过外积）
 - 可以使用Monte Carlo近似
 - 适合分布式计算和在线更新
+- 自动保证半正定性
+
+**计算复杂度对比**：
+| 方法 | 时间复杂度 | 空间复杂度 | 并行性 |
+|------|------------|------------|--------|
+| Full Hessian | $O(n^2 \cdot \text{cost}(\nabla^2))$ | $O(n^2)$ | 困难 |
+| Fisher (外积) | $O(n^2 \cdot \text{cost}(\nabla))$ | $O(n^2)$ | 容易 |
+| Block Fisher | $O(b \cdot n^2/b^2)$ | $O(n^2/b)$ | 高度并行 |
+| Low-rank Fisher | $O(nr \cdot \text{cost}(\nabla))$ | $O(nr)$ | 容易 |
+
+**高级计算优化**：
+
+1. **结构化Fisher计算**：
+   
+   **层级分解**（用于深度网络）：
+   $$\mathbf{F} = \begin{pmatrix}
+   \mathbf{F}_{11} & \mathbf{F}_{12} & \cdots \\
+   \mathbf{F}_{21} & \mathbf{F}_{22} & \cdots \\
+   \vdots & \vdots & \ddots
+   \end{pmatrix}$$
+   
+   - 块对角近似：忽略层间相关性
+   - 三对角近似：只保留相邻层
+   - Kronecker近似：$\mathbf{F}_l \approx \mathbf{A}_l \otimes \mathbf{G}_l$
+
+2. **动量方法加速Fisher估计**：
+   
+   **指数移动平均**：
+   $$\mathbf{F}_t = \beta\mathbf{F}_{t-1} + (1-\beta)\mathbf{g}_t\mathbf{g}_t^T$$
+   
+   **二阶动量**（类似Adam）：
+   $$\mathbf{M}_t = \beta_1\mathbf{M}_{t-1} + (1-\beta_1)\mathbf{g}_t$$
+   $$\mathbf{F}_t = \beta_2\mathbf{F}_{t-1} + (1-\beta_2)\mathbf{g}_t\mathbf{g}_t^T$$
+
+3. **采样策略优化**：
+   
+   **重要性采样**：
+   - 选择信息量大的样本：$p_i \propto \|\mathbf{g}_i\|^2$
+   - 无偏估计：$\hat{\mathbf{F}} = \sum_{i \in S} \frac{1}{Np_i}\mathbf{g}_i\mathbf{g}_i^T$
+   
+   **分层采样**：
+   - 按梯度范数分层
+   - 每层内均匀采样
+   - 减少方差同时保持代表性
 
 **高效计算策略**：
 
