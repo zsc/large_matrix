@@ -44,6 +44,8 @@ $$\mathcal{M}_r^{m \times n} = \{\mathbf{X} \in \mathbb{R}^{m \times n} : \text{
 
 切空间$T_{\mathbf{X}}\mathcal{M}$是流形$\mathcal{M}$在点$\mathbf{X}$处的线性化，包含了所有可行的"无穷小移动方向"。理解切空间的结构对于梯度计算、约束保持和算法设计至关重要。切空间可以通过多种等价方式刻画：速度向量、约束的核空间或局部参数化的导数像。
 
+**几何直觉**：想象流形为嵌入在高维空间中的曲面，切空间就是在某点处"贴合"流形的平面。这个平面包含了所有在该点处沿流形的可能移动方向。对于约束优化，切空间正是满足线性化约束的方向集合。
+
 **Stiefel流形的切空间**：
 $$T_{\mathbf{X}}\mathcal{V}_k(\mathbb{R}^n) = \{\boldsymbol{\xi} \in \mathbb{R}^{n \times k} : \mathbf{X}^T\boldsymbol{\xi} + \boldsymbol{\xi}^T\mathbf{X} = \mathbf{0}\}$$
 
@@ -72,14 +74,34 @@ $$T_{\mathbf{X}}\mathcal{S}_{++}^n = \mathcal{S}^n = \{\boldsymbol{\xi} \in \mat
 
 **切空间的数值表示**：实践中，存储和操作切向量需要高效的数据结构：
 - **压缩表示**：对Stiefel流形，只存储$\mathbf{A}$和$\mathbf{B}$而非完整的$\boldsymbol{\xi}$
+  - 内存节省：从$O(nk)$降至$O(k^2 + k(n-k))$
+  - 适用场景：$k \ll n$时效果显著
+  - 实现技巧：使用稀疏矩阵格式存储
 - **正交基**：预计算切空间的正交基，便于投影和内积计算
+  - 构造方法：通过约束的雅可比矩阵的零空间
+  - 更新策略：使用Gram-Schmidt正交化或Householder变换
+  - 数值稳定性：定期重正交化防止基漂移
 - **隐式表示**：通过线性算子避免显式构造大矩阵
+  - 算子形式：定义`apply_T(v)`和`apply_T_transpose(v)`
+  - 优势：避免存储大型密集矩阵
+  - 应用：Krylov子空间方法、迭代求解器
+
+**切空间的几何性质**：
+- **维数公式**：$\dim(T_\mathbf{X}\mathcal{M}) = \dim(\mathcal{M})$，由约束个数决定
+- **正交分解**：环境空间 = 切空间 ⊕ 法空间
+- **局部平坦性**：在足够小的邻域内，流形可以用切空间近似
 
 **研究线索**：切空间的几何性质（如截面曲率）如何影响优化算法的收敛速度是一个重要但尚未充分研究的问题。特别是在高维情况下，局部几何的统计性质可能提供新的算法设计思路。
 
 ### 10.1.3 Riemannian度量
 
 Riemannian度量为每个切空间赋予内积结构，使得我们能够测量切向量的长度和夹角。选择合适的度量对算法性能影响重大，不同的度量导致不同的梯度、Hessian和测地线，从而影响收敛速度和数值稳定性。
+
+**度量的作用**：
+1. **定义长度和角度**：$\|\boldsymbol{\xi}\|_\mathbf{X} = \sqrt{g_\mathbf{X}(\boldsymbol{\xi}, \boldsymbol{\xi})}$
+2. **确定最陡方向**：梯度是使方向导数最大的单位向量
+3. **影响算法动力学**：不同度量下的梯度流有不同的轨迹
+4. **编码问题结构**：自然度量often反映问题的内在对称性
 
 **标准度量**：最常用的是从环境空间继承的Euclidean度量
 $$g_{\mathbf{X}}(\boldsymbol{\xi}, \boldsymbol{\eta}) = \langle \boldsymbol{\xi}, \boldsymbol{\eta} \rangle_F = \text{tr}(\boldsymbol{\xi}^T\boldsymbol{\eta})$$
@@ -102,16 +124,35 @@ $$g_{\mathbf{X}}(\boldsymbol{\xi}, \boldsymbol{\eta}) = \text{tr}(\mathbf{X}^{-1
 - **加权度量**：$g_{\mathbf{X}}(\boldsymbol{\xi}, \boldsymbol{\eta}) = \text{tr}(\boldsymbol{\xi}^T\mathbf{W}\boldsymbol{\eta})$，其中$\mathbf{W}$编码问题特定的重要性
 
 **度量选择的影响**：
-1. **条件数**：适当的度量可以改善优化问题的条件数。例如，对于正定矩阵的优化，仿射不变度量often提供更好的条件数
+1. **条件数**：适当的度量可以改善优化问题的条件数
+   - 例子：对于正定矩阵优化，仿射不变度量将条件数从$\kappa(\mathbf{X})^2$改善到$\kappa(\mathbf{X})$
+   - 机制：度量acts as隐式预条件子
+   - 量化：可以通过Hessian的特征值分布评估
 2. **收敛速度**：Natural gradient（使用Fisher信息度量）在许多统计问题中展现二阶收敛性质
+   - 理论保证：在指数族分布中达到Fisher效率
+   - 实践表现：typically比标准梯度快2-10倍
+   - 代价：每步计算时间增加$O(n^2)$到$O(n^3)$
 3. **数值稳定性**：某些度量（如Log-Euclidean）通过避免矩阵求逆提高数值稳定性
+   - 问题场景：当矩阵接近奇异时
+   - 解决方案：使用矩阵对数/指数而非直接求逆
+   - 精度提升：可以处理条件数高达$10^{15}$的问题
 4. **计算复杂度**：标准度量计算最快，而信息几何度量需要额外的矩阵运算
+   - 标准度量：$O(nk)$用于内积计算
+   - 仿射不变：需要$O(n^3)$的矩阵求逆
+   - 折中方案：使用对角或块对角近似
+
+**自适应度量策略**：
+- **问题相关度量**：根据目标函数的局部结构调整
+- **混合度量**：在不同优化阶段使用不同度量
+- **学习度量**：通过历史信息学习最优度量参数
 
 **研究线索**：自适应度量选择——根据问题的局部几何动态调整度量——是一个有前景的研究方向。这可能结合了不同度量的优点，但理论分析仍然困难。
 
 ### 10.1.4 测地线与指数映射
 
 测地线是流形上的"直线"，即局部最短路径。指数映射$\exp_{\mathbf{X}}: T_{\mathbf{X}}\mathcal{M} \to \mathcal{M}$将切向量映射到沿测地线的点。理解测地线的性质对于设计高效的优化算法和分析收敛性至关重要。
+
+**物理类比**：测地线如同在曲面上拉紧的橡皮筋——它们自然地找到最短路径。在球面上，测地线是大圆弧；在平面上，测地线是直线。这种几何结构直接影响优化算法的轨迹。
 
 **测地线的刻画**：测地线$\gamma(t)$满足测地线方程
 $$\nabla_{\dot{\gamma}}\dot{\gamma} = 0$$
@@ -128,15 +169,44 @@ $$\exp_{\mathbf{X}}(\boldsymbol{\xi}) = [\mathbf{X}, \mathbf{Q}]\exp\left(\begin
 
 **计算复杂度分析**：
 - Stiefel流形：$O(nk^2 + k^3)$，主要开销在矩阵指数
+  - 矩阵指数计算：Padé近似或缩放和平方法
+  - 特殊情况：当$k=1$时简化为$O(n)$
+  - 并行化：矩阵指数可以高效并行计算
 - 正定矩阵：$O(n^3)$，需要特征分解
+  - 优化技巧：使用Cholesky分解替代完整特征分解
+  - 增量更新：利用Sherman-Morrison公式
+  - 稀疏情况：复杂度可降至$O(n^2)$或更低
 - 固定秩流形：$O(r^2(m+n))$每步，需要多步数值积分
+  - 适应步长：使用Runge-Kutta方法
+  - 早停策略：当达到足够精度时终止
+  - 特殊结构：利用低秩结构加速
 
 然而，指数映射的计算通常开销较大，实践中常用更简单的回缩映射替代。关键观察是：对于一阶方法，只需要保证一阶近似的正确性；对于二阶方法，回缩的二阶近似通常就足够了。
 
-**对数映射与内射半径**：对数映射$\log_{\mathbf{X}}: \mathcal{M} \to T_{\mathbf{X}}\mathcal{M}$是指数映射的（局部）逆。内射半径$\text{inj}(\mathbf{X})$是使得指数映射为微分同胚的最大半径。了解内射半径对于：
+**指数映射vs回缩的权衡**：
+- **精度要求**：高精度场景（如物理模拟）需要指数映射
+- **计算预算**：大规模问题倾向于使用简单回缩
+- **收敛保证**：理论分析时指数映射提供更强保证
+- **实现复杂度**：回缩通常更容易实现和调试
+
+**对数映射与内射半径**：对数映射$\log_{\mathbf{X}}: \mathcal{M} \to T_{\mathbf{X}}\mathcal{M}$是指数映射的（局部）逆。内射半径$\text{inj}(\mathbf{X})$是使得指数映射为微分同胚的最大半径。
+
+了解内射半径对于：
 - 确定信赖域算法的最大步长
+  - 安全范围：$\Delta < \text{inj}(\mathbf{X})$保证局部凸性
+  - 自适应策略：根据局部曲率估计内射半径
 - 分析全局收敛性
+  - 吸引域：内射半径决定局部最小值的吸引域大小
+  - 逃离策略：当步长超过内射半径时可能逃离局部最小
 - 设计测地线搜索算法
+  - 搜索范围：限制在内射半径内保证单调性
+  - 加速技巧：利用测地线的对称性减少计算
+
+**具体流形的内射半径**：
+- 球面$S^n$：$\text{inj} = \pi$（全局常数）
+- Stiefel流形：$\text{inj}(\mathbf{X}) = \pi/2$
+- Grassmann流形：$\text{inj} = \pi/2$
+- 正定矩阵：$\text{inj}(\mathbf{X}) = \infty$（完备单连通）
 
 **研究线索**：对于许多实际应用的流形，精确计算或有效近似内射半径仍是开放问题。这限制了某些理论保证的实用性。
 
@@ -150,6 +220,8 @@ $$\exp_{\mathbf{X}}(\boldsymbol{\xi}) = [\mathbf{X}, \mathbf{Q}]\exp\left(\begin
 $$g_{\mathbf{X}}(\text{grad} f(\mathbf{X}), \boldsymbol{\xi}) = \text{D}f(\mathbf{X})[\boldsymbol{\xi}], \quad \forall \boldsymbol{\xi} \in T_{\mathbf{X}}\mathcal{M}$$
 
 其中$\text{D}f(\mathbf{X})[\boldsymbol{\xi}]$是$f$在$\mathbf{X}$沿方向$\boldsymbol{\xi}$的方向导数。
+
+**Riesz表示定理的流形版本**：Riemannian梯度是函数微分$df$在度量$g$下的Riesz表示。这种观点将余切向量（微分形式）转换为切向量，体现了度量的核心作用。
 
 **投影方法**：若$f$可以扩展到环境空间，则Riemannian梯度是Euclidean梯度在切空间上的正交投影（相对于所选度量）：
 $$\text{grad} f(\mathbf{X}) = \text{Proj}_{T_{\mathbf{X}}\mathcal{M}}^g(\nabla f(\mathbf{X}))$$
@@ -172,11 +244,28 @@ $$\text{grad} f(\mathbf{X}) = \mathbf{X}\text{sym}(\nabla f(\mathbf{X}))\mathbf{
 
 **计算技巧与优化**：
 1. **利用稀疏性**：当$\nabla f(\mathbf{X})$稀疏时，投影可以高效计算
+   - 矩阵补全：只处理观测位置$\Omega$
+   - 稀疏梯度：$O(|\Omega|r)$复杂度而非$O(mnr)$
+   - 数据结构：CSR/CSC格式存储
 2. **避免显式正交补**：使用$\mathbf{I} - \mathbf{U}\mathbf{U}^T$而非存储$\mathbf{U}_\perp$
+   - 内存节省：$O((n-k)k)$空间
+   - 计算模式：先计算$\mathbf{U}^T\mathbf{v}$，再计算$\mathbf{U}(\mathbf{U}^T\mathbf{v})$
+   - 数值稳定：避免大矩阵相减
 3. **缓存重用**：在迭代算法中重用QR分解或SVD
+   - 增量更新：使用rank-1更新公式
+   - lazy evaluation：延迟计算直到必要时
+   - 周期刷新：每$k$次迭代重新计算防止累积误差
 4. **自动微分**：现代框架（PyTorch, JAX）可以自动计算流形梯度
+   - 自定义操作：定义投影和回缩的梯度规则
+   - 高阶导数：支持Hessian-向量积计算
+   - GPU加速：自动利用并行计算
 
 **梯度的几何意义**：Riemannian梯度指向函数在流形上增长最快的方向，其模长反映增长率。与欧氏情况不同，这个方向依赖于所选的度量，体现了"最陡"的相对性。
+
+**梯度计算的陷阱**：
+- **投影顺序**：必须先计算Euclidean梯度，再投影
+- **度量一致性**：确保投影使用与问题相同的度量
+- **数值精度**：接近约束边界时投影可能不稳定
 
 **研究线索**：对于非光滑函数的流形次梯度理论仍在发展中，这对于稀疏优化和鲁棒统计特别重要。
 
@@ -186,6 +275,8 @@ Riemannian Hessian描述梯度场在流形上的变化率。对于切向量$\bol
 $$\text{Hess} f(\mathbf{X})[\boldsymbol{\xi}] = \nabla_{\boldsymbol{\xi}} \text{grad} f(\mathbf{X})$$
 
 其中$\nabla$是Levi-Civita联络，它唯一地由度量决定并保持度量相容性和无挠性。
+
+**与欧氏Hessian的关系**：Riemannian Hessian = Euclidean Hessian的切向部分 + 流形曲率的贡献。这种分解揭示了内在曲率如何影响二阶信息。
 
 **计算的三步框架**：
 
@@ -214,22 +305,46 @@ $$\text{Hess} f(\mathbf{X})[\boldsymbol{\xi}] = \mathbf{X}\text{sym}(\text{D}^2f
 
 1. **有限差分近似**：
    $$\text{Hess} f(\mathbf{X})[\boldsymbol{\xi}] \approx \frac{1}{\epsilon}[\text{grad} f(\mathcal{R}_{\mathbf{X}}(\epsilon\boldsymbol{\xi})) - \mathcal{T}_{\epsilon\boldsymbol{\xi}}^{-1}(\text{grad} f(\mathbf{X}))]$$
+   - 步长选择：$\epsilon = \sqrt{\text{machine precision}} \cdot \|\boldsymbol{\xi}\|$
+   - 误差分析：$O(\epsilon)$截断误差 + $O(1/\epsilon)$舍入误差
+   - 中心差分：更高精度但需要两次评估
 
 2. **自动微分**：利用反向模式自动微分计算精确的Hessian-向量积
+   - 复杂度：$O(n)$内存，$O(n)$时间
+   - 实现：`torch.autograd.grad`二次调用
+   - 优势：精确且无需调参
 
 3. **BFGS近似**：维护Hessian的低秩近似，适用于大规模问题
+   - L-BFGS：只存储$m$对向量，$O(mn)$内存
+   - 更新公式：保持正定性和对称性
+   - 初始化：使用度量信息改善性能
 
 **Hessian的性质与应用**：
 - **自伴性**：相对于所选度量，Hessian是自伴算子
+  - 意义：$g(\text{Hess}f[\boldsymbol{\xi}], \boldsymbol{\eta}) = g(\boldsymbol{\xi}, \text{Hess}f[\boldsymbol{\eta}])$
+  - 应用：保证特征值为实数
 - **临界点分类**：正定Hessian表示局部最小值
+  - 充分条件：$\lambda_{\min}(\text{Hess}f) > 0$
+  - 鞍点检测：存在负特征值
+  - 退化情况：零特征值需要高阶检验
 - **收敛速度**：Hessian的条件数影响Newton法的收敛速度
+  - 二次收敛域：$\|\mathbf{X} - \mathbf{X}^*\| < \frac{2\mu}{3L}$
+  - 收敛率：$\|\mathbf{X}_{k+1} - \mathbf{X}^*\| \leq C\|\mathbf{X}_k - \mathbf{X}^*\|^2$
 - **负曲率利用**：在非凸优化中，负特征值方向可用于逃离鞍点
+  - 信赖域方法：自然处理负曲率
+  - cubic regularization：理论保证逃离
+  - 随机扰动：实用的逃离策略
 
 **研究线索**：流形上的拟Newton方法如何最优地利用曲率信息仍有改进空间。特别是，如何设计保持流形结构的秩-1或秩-2更新公式。
 
 ### 10.2.3 二阶优化算法
 
 二阶方法利用Hessian信息实现更快的局部收敛。在流形上实现这些方法需要仔细处理几何结构。
+
+**二阶方法的优势**：
+- **超线性收敛**：在最小值附近远快于一阶方法
+- **尺度不变性**：对变量线性变换不敏感
+- **适应性**：自动适应问题的局部几何
 
 **Riemannian Newton法**：求解切空间中的Newton方程
 $$\text{Hess} f(\mathbf{X}_k)[\boldsymbol{\eta}_k] = -\text{grad} f(\mathbf{X}_k)$$
@@ -262,12 +377,26 @@ $$\mathbf{H}_{k+1} = \mathcal{T}_{\alpha_k\boldsymbol{\eta}_k}(\mathbf{H}_k) + \
 
 **收敛性分析**：
 - **局部收敛**：Newton法在非退化最小值附近达到二次收敛
+  - 收敛条件：$\mu I \preceq \text{Hess}f \preceq LI$
+  - 收敛速率：$\|\mathbf{X}_{k+1} - \mathbf{X}^*\| \leq \frac{L}{2\mu^2}\|\mathbf{X}_k - \mathbf{X}^*\|^2$
+  - 收敛域：依赖于$L/\mu$和内射半径
 - **全局收敛**：信赖域方法保证收敛到一阶驻点
+  - Cauchy点条件：保证充分下降
+  - 信赖域调整：基于模型准确性
+  - 最终收敛：$\liminf_{k\to\infty} \|\text{grad}f(\mathbf{X}_k)\| = 0$
 - **复杂度**：每次迭代$O(n^3)$（Newton）或$O(mn)$（L-BFGS）
+  - 内存需求：Newton $O(n^2)$，L-BFGS $O(mn)$
+  - 迭代次数：Newton通常更少
+  - 实际选择：依赖于问题规模和精度要求
 
 ### 10.2.4 曲率的影响
 
 流形的内在曲率深刻影响优化算法的行为。理解这种影响对于算法设计和分析至关重要。
+
+**曲率的几何学起源**：曲率测量流形偏离平坦空间的程度。在优化中，它影响：
+- 梯度流的发散/收敛行为
+- 平行移动的变形
+- 局部凸性的保持范围
 
 **截面曲率的作用**：
 - **正曲率**（如球面）：梯度流趋向于比欧氏空间更快地收敛，因为测地线会聚
@@ -281,22 +410,39 @@ $$\mathbf{H}_{k+1} = \mathcal{T}_{\alpha_k\boldsymbol{\eta}_k}(\mathbf{H}_k) + \
 
 **曲率修正技术**：
 1. **动量修正**：Riemannian加速梯度中，动量项需要根据曲率调整
-   $$\boldsymbol{\mu}_{k+1} = \gamma\mathcal{T}_{\alpha_k\boldsymbol{\xi}_k}(\boldsymbol{\mu}_k) - \alpha_k\text{grad} f(\mathbf{X}_{k+1}) + \text{曲率修正项}$$
+   $$\boldsymbol{\mu}_{k+1} = \gamma\mathcal{T}_{\alpha_k\boldsymbol{\xi}_k}(\boldsymbol{\mu}_k) - \alpha_k\text{grad} f(\mathbf{X}_{k+1}) + \mathcal{K}(\boldsymbol{\mu}_k, \boldsymbol{\xi}_k)$$
+   其中$\mathcal{K}$是曲率修正算子：
+   - 一阶近似：$\mathcal{K} = O(\|\boldsymbol{\xi}\|^2)$
+   - 实用形式：基于Ricci曲率的估计
 
 2. **预条件设计**：利用Ricci曲率信息设计更好的预条件子
+   - 曲率自适应：$\mathbf{P} = \mathbf{I} + \beta\text{Ric}$
+   - 实现挑战：高效计算Ricci曲率
+   - 近似方法：使用采样估计
 
 3. **自适应算法**：根据局部曲率估计动态调整步长和其他参数
+   - 曲率估计：通过测地线偏差
+   - 步长选择：$\alpha_k = \min(\bar{\alpha}, c/\sqrt{|\kappa|})$
+   - 收敛保证：在有界曲率假设下
 
 **曲率与优化landscape的关系**：
 - **正曲率区域**：通常对应凸区域，优化相对容易
+  - 球面例子：常正曲率加速特征值计算
+  - 定量分析：收敛速率提升$(1 + \kappa)$倍
 - **负曲率区域**：可能存在多个局部最优，需要全局策略
+  - 双曲面例子：指数发散导致不稳定
+  - 应对策略：较小步长或适应性预条件
 - **零曲率方向**：可能导致收敛变慢，需要特殊处理
+  - 平坦区域：使用动量或自适应方法
+  - 退化情况：可能需要正则化
 
 **研究线索**：如何系统地利用流形的全局拓扑和几何信息来设计更智能的优化算法仍是开放问题。特别是，能否通过学习流形的几何来加速优化？
 
 ## 10.3 回缩与向量传输
 
 虽然指数映射提供了理论上优雅的流形更新方式，但其计算成本往往过高。回缩（retraction）提供了计算友好的替代方案，而向量传输（vector transport）则是实现高效迭代算法的关键组件。这两个概念的巧妙设计往往决定了流形优化算法的实用性。
+
+**核心思想**：回缩和向量传输是指数映射和平行移动的“工程近似”。它们牺牲一些理论美感来换取计算效率，但保留了足够的几何结构以保证算法收敛性。
 
 ### 10.3.1 回缩映射
 
