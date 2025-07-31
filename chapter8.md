@@ -20,68 +20,347 @@ $$W = \Omega\left(\frac{n^3}{\sqrt{PM}}\right)$$
 - 重用数据的能力受限于内存大小
 - 使用Hong-Kung的红蓝卵石游戏（red-blue pebble game）可以严格证明
 
+**红蓝卵石游戏的核心思想**：
+1. **计算图表示**：将矩阵运算表示为有向无环图（DAG），节点代表数据，边代表依赖关系
+2. **卵石规则**：
+   - 红卵石：表示内存中的数据（最多 $M$ 个）
+   - 蓝卵石：表示需要从其他处理器通信获得的数据
+   - 计算规则：只有当节点的所有前驱都有卵石时，才能在该节点放置卵石
+3. **下界推导**：
+   - 定义计算的"footprint"：在某个时间段内访问的不同数据量
+   - Loomis-Whitney不等式：对于3D格点，$|S|^3 \leq |S_{xy}| \cdot |S_{xz}| \cdot |S_{yz}|$
+   - 应用到矩阵乘法：每个处理器的footprint至少为 $\Omega(n^3/P)$
+
+**扩展到一般线性代数运算**：
+
+对于计算 $2m$ 个 $n \times n$ 矩阵的 $m$ 个乘积（如 $\mathbf{C}_1 = \mathbf{A}_1\mathbf{B}_1, ..., \mathbf{C}_m = \mathbf{A}_m\mathbf{B}_m$），通信下界为：
+
+$$W = \Omega\left(\frac{mn^2}{\sqrt{PM/m}}\right)$$
+
+当 $m = 1$ 时退化为标准矩阵乘法的下界。
+
 **其他重要运算的通信下界**：
 - LU分解：$W = \Omega(n^2/\sqrt{P})$（假设使用 $O(n^2/P)$ 内存）
 - Cholesky分解：与LU分解相同
 - QR分解：$W = \Omega(n^2/\sqrt{P})$
 - 特征值分解：$W = \Omega(n^2)$（由于固有的数据依赖性）
+- Krylov子空间方法（$k$ 步）：$W = \Omega(kn/\sqrt{P})$
+
+**内存-通信权衡**：
+
+增加每个处理器的内存 $M$ 可以减少通信，但存在基本限制。定义效率指标：
+
+$$E = \frac{\text{计算量}/P}{\text{通信量} + \text{计算量}/P}$$
+
+对于矩阵乘法，当 $M = \Theta(n^2/P^{2/3})$ 时可以达到最优效率 $E = \Theta(1)$。
+
+**实际意义**：
+
+1. **算法设计指导**：任何算法都不应期望突破这些下界
+2. **内存规划**：根据下界公式优化内存分配
+3. **弱扩展性分析**：保持 $n^3/P$ 固定时，通信量增长为 $O(n^2) = O((n^3/P)^{2/3}P^{2/3})$
+
+**前沿研究方向**：
+- **能量下界**：考虑通信的能量消耗，不同距离的通信能耗不同
+- **I/O复杂度**：扩展到多级存储层次（缓存、内存、磁盘）
+- **近似算法的下界**：允许一定误差时的通信下界
+- **量子通信下界**：量子纠缠是否能突破经典下界
 
 ### 8.1.2 2D Block-Cyclic分布与SUMMA算法
 
 最经典的矩阵分布策略是2D block-cyclic分布。将矩阵划分为 $\sqrt{P} \times \sqrt{P}$ 的处理器网格，每个处理器负责多个分散的块，这样可以实现良好的负载均衡。
 
+**Block-Cyclic分布的数学描述**：
+
+给定块大小 $r \times c$，处理器网格 $P_r \times P_c$，矩阵元素 $A_{ij}$ 被分配给处理器 $(p, q)$，其中：
+$$p = \left\lfloor \frac{i/r \bmod P_r}{1} \right\rfloor, \quad q = \left\lfloor \frac{j/c \bmod P_c}{1} \right\rfloor$$
+
+每个处理器拥有的局部矩阵大小约为 $\lceil n/P_r \rceil \times \lceil n/P_c \rceil$。
+
 **为什么选择Block-Cyclic而非简单Block分布**：
 - **负载均衡**：矩阵运算中后期阶段的工作量不均匀（如LU分解）
+  - LU分解中，随着消元进行，活跃区域逐渐缩小到右下角
+  - Block-cyclic确保所有处理器在各阶段都有工作
 - **可扩展性**：适应不同的矩阵大小和处理器数量
+  - 块大小可以独立于处理器数量选择
+  - 支持非方形处理器网格
 - **局部性**：每个处理器的数据局部性仍然较好
+  - 连续的 $r \times c$ 块保持在一起
+  - 有利于cache性能和向量化
+
+**ScaLAPACK中的分布参数**：
+- `MB`, `NB`：块的行数和列数
+- `RSRC`, `CSRC`：起始处理器坐标
+- `LLD`：局部矩阵的leading dimension
 
 SUMMA (Scalable Universal Matrix Multiplication Algorithm) 基于这种分布实现了接近最优的通信复杂度：
 
+**SUMMA算法详细步骤**：
+
 1. **外积形式**：$\mathbf{C} = \sum_{k=1}^{n} \mathbf{a}_k \mathbf{b}_k^T$
-2. **广播策略**：第 $k$ 步，拥有 $\mathbf{a}_k$ 的处理器行广播该列，拥有 $\mathbf{b}_k$ 的处理器列广播该行
-3. **通信量**：$O(n^2/\sqrt{P})$，达到理论下界
+2. **分块版本**：将 $k$ 维度分成大小为 $b$ 的块
+   ```
+   for kb = 0 to n-1 step b:
+       k_size = min(b, n - kb)
+       // 步骤 1: 行广播
+       if 我的处理器列拥有 A[:, kb:kb+k_size]:
+           在我的处理器行内广播 A_local[:, kb:kb+k_size]
+       
+       // 步骤 2: 列广播  
+       if 我的处理器行拥有 B[kb:kb+k_size, :]:
+           在我的处理器列内广播 B_local[kb:kb+k_size, :]
+       
+       // 步骤 3: 局部矩阵乘法
+       C_local += A_broadcast × B_broadcast
+   ```
+
+3. **通信量分析**：
+   - 每个处理器接收 $n/\sqrt{P} \times n$ 的 A 数据（按列分块）
+   - 每个处理器接收 $n \times n/\sqrt{P}$ 的 B 数据（按行分块）
+   - 总通信量：$O(n^2/\sqrt{P})$，达到理论下界
 
 **SUMMA的优化变体**：
-- **带宽优化**：使用流水线广播减少延迟影响
-- **内存优化**：分块大小 $b$ 的选择影响cache性能，典型选择 $b = \Theta(\sqrt{M})$
-- **重叠优化**：使用双缓冲技术重叠通信与计算
 
-**Cannon算法对比**：
-- Cannon算法需要初始数据偏移，编程复杂度更高
-- SUMMA更适合非方形处理器网格
-- 两者渐进通信复杂度相同，但SUMMA常数因子略大
+1. **带宽优化 - 流水线广播**：
+   - 将广播分解为多个小消息
+   - 使用树形或二项式树广播拓扑
+   - 减少延迟对大消息的影响
+
+2. **内存优化**：
+   - 分块大小 $b$ 的选择影响cache性能
+   - 优化准则：$3b^2 \leq L$（L是cache大小）
+   - 典型选择：$b = \Theta(\sqrt{M/3})$
+
+3. **重叠优化**：
+   ```
+   使用双缓冲技术：
+   buffer_A[2][...], buffer_B[2][...]
+   
+   for kb = 0 to n-1 step b:
+       curr = kb % 2
+       next = 1 - curr
+       
+       // 异步开始下一块的通信
+       if kb + b < n:
+           MPI_Ibcast(buffer_A[next], ...)
+           MPI_Ibcast(buffer_B[next], ...)
+       
+       // 使用当前块计算
+       GEMM(buffer_A[curr], buffer_B[curr], C_local)
+       
+       // 等待下一块通信完成
+       if kb + b < n:
+           MPI_Wait(...)
+   ```
+
+**与其他并行矩阵乘法算法的比较**：
+
+1. **Cannon算法**：
+   - 初始偏移：$A$ 向左循环移位 $i$ 步，$B$ 向上循环移位 $j$ 步
+   - 每步：计算局部乘积，然后 $A$ 左移，$B$ 上移
+   - 优点：所有通信都是最近邻，适合网格拓扑
+   - 缺点：需要方形处理器网格，初始化复杂
+
+2. **Fox算法（广播乘法算法）**：
+   - 每步广播 $A$ 的一个块列，$B$ 进行列循环
+   - 通信模式与SUMMA类似，但实现细节不同
+
+3. **3D算法**：
+   - 使用 $P^{1/3} \times P^{1/3} \times P^{1/3}$ 的处理器网格
+   - 可以达到更低的通信量：$O(n^2/P^{2/3})$
+   - 代价是更复杂的数据分布和更多的内存使用
+
+**性能模型与分析**：
+
+SUMMA的执行时间可以建模为：
+$$T = \gamma \frac{n^3}{P} + \beta \frac{n^2}{\sqrt{P}} + \alpha \log P \frac{n}{b}$$
+
+其中：
+- $\gamma$：浮点运算时间
+- $\beta$：带宽的倒数
+- $\alpha$：延迟
+- 第三项来自 $n/b$ 次广播，每次 $O(\log P)$ 的延迟
+
+**SUMMA在现代系统上的实现考虑**：
+
+1. **GPU加速**：
+   - 使用cuBLAS或rocBLAS进行局部GEMM
+   - NCCL进行GPU间通信
+   - GPUDirect RDMA减少CPU参与
+
+2. **混合并行**：
+   - MPI处理节点间通信
+   - OpenMP/CUDA处理节点内并行
+   - 优化节点内的NUMA效应
+
+3. **容错SUMMA**：
+   - 使用校验和矩阵：$\tilde{\mathbf{A}} = [\mathbf{A}; \mathbf{e}^T\mathbf{A}]$
+   - ABFT (Algorithm-Based Fault Tolerance) 检测和纠正软错误
+   - 开销约5-10%，可检测和定位单个处理器故障
 
 ### 8.1.3 Communication-Avoiding算法
 
-CA (Communication-Avoiding) 算法通过重组计算来减少通信频率。核心思想是在局部进行更多计算，以换取通信次数的减少。
+CA (Communication-Avoiding) 算法通过重组计算来减少通信频率。核心思想是在局部进行更多计算，以换取通信次数的减少。这类算法特别适合现代计算环境，其中通信成本远高于计算成本。
+
+**理论基础：通信与计算的权衡**
+
+定义 $s$-步方法的效率指标：
+$$\text{Efficiency} = \frac{\text{原始算法通信次数}}{\text{CA算法通信次数}} \times \frac{\text{CA算法计算量}}{\text{原始算法计算量}}$$
+
+理想情况下，通信减少 $s$ 倍，计算增加不超过常数倍，实现近 $s$ 倍的加速。
 
 **Tall-Skinny QR (TSQR)**：对于 $\mathbf{A} \in \mathbb{R}^{m \times n}$ ($m \gg n$)：
-1. 将 $\mathbf{A}$ 按行分块：$\mathbf{A} = [\mathbf{A}_1^T, \mathbf{A}_2^T, ..., \mathbf{A}_P^T]^T$
-2. 并行计算局部QR：$\mathbf{A}_i = \mathbf{Q}_i \mathbf{R}_i$
-3. 递归合并：$[\mathbf{R}_1^T, \mathbf{R}_2^T]^T = \tilde{\mathbf{Q}} \tilde{\mathbf{R}}$
 
-通信复杂度从经典算法的 $O(n^2 \log P)$ 降低到 $O(n^2)$。
+传统Householder QR需要 $O(n)$ 次同步，TSQR将其减少到 $O(\log P)$：
 
-**TSQR的数值稳定性**：
-- 条件数：$\kappa(\mathbf{R}_{\text{TSQR}}) \leq \kappa(\mathbf{R}_{\text{HouseQR}})$
-- 正交性：$\|\mathbf{Q}^T\mathbf{Q} - \mathbf{I}\|_2 = O(\epsilon \kappa(\mathbf{A}))$
-- 比CGS（Classical Gram-Schmidt）稳定得多
+1. **并行局部QR分解**：
+   ```
+   将 A 按行分块：A = [A₁ᵀ, A₂ᵀ, ..., Aₚᵀ]ᵀ
+   并行计算：Aᵢ = QᵢRᵢ，其中 Qᵢ ∈ ℝ^(mᵢ×n), Rᵢ ∈ ℝ^(n×n)
+   ```
 
-**CA-GMRES** 通过计算 $s$ 步Krylov子空间基向量后再正交化，将通信次数减少 $s$ 倍：
+2. **递归合并（二叉树reduction）**：
+   ```
+   Level 1: [R₁; R₂] = Q₁₂R₁₂, [R₃; R₄] = Q₃₄R₃₄, ...
+   Level 2: [R₁₂; R₃₄] = Q₁₂₃₄R₁₂₃₄, ...
+   ...
+   Level log P: 得到最终的 R
+   ```
 
-$$\mathcal{K}_s(\mathbf{A}, \mathbf{v}) = \text{span}\{\mathbf{v}, \mathbf{A}\mathbf{v}, ..., \mathbf{A}^{s-1}\mathbf{v}\}$$
+3. **重构Q矩阵**（如需要）：
+   ```
+   从叶到根应用所有的Householder变换
+   通信模式与reduction相反
+   ```
 
-使用矩阵幂核技术（matrix powers kernel）可以稳定地计算这些基向量。
+**TSQR的数值稳定性分析**：
 
-**稳定性挑战与解决方案**：
-1. **单项式基的病态性**：使用Newton基或Chebyshev基
-2. **舍入误差累积**：使用混合精度技术
-3. **基向量的线性相关**：自适应选择 $s$ 值
+定理：TSQR产生的 $\mathbf{R}$ 因子满足：
+$$\|\mathbf{R}_{\text{TSQR}} - \mathbf{R}_{\text{HouseQR}}\|_F \leq O(\epsilon \kappa(\mathbf{A}) n^{3/2})$$
+
+正交性保证：
+$$\|\mathbf{Q}^T\mathbf{Q} - \mathbf{I}\|_2 \leq O(\epsilon n \log P)$$
+
+相比之下，Classical Gram-Schmidt的正交性误差为 $O(\epsilon \kappa(\mathbf{A})^n)$，在病态问题上差异巨大。
+
+**CA-Krylov子空间方法**
+
+核心思想：一次计算 $s$ 个Krylov基向量，然后统一正交化。
+
+**矩阵幂核（Matrix Powers Kernel）**：
+
+给定起始向量 $\mathbf{v}$，计算：
+$$[\mathbf{v}, \mathbf{A}\mathbf{v}, \mathbf{A}^2\mathbf{v}, ..., \mathbf{A}^{s-1}\mathbf{v}]$$
+
+朴素方法数值不稳定。稳定的方法包括：
+
+1. **Newton基**：
+   $$\mathbf{p}_0 = \mathbf{v}, \quad \mathbf{p}_{j+1} = (\mathbf{A} - \theta_j\mathbf{I})\mathbf{p}_j$$
+   其中 $\theta_j$ 是Ritz值的估计
+
+2. **Chebyshev基**：
+   $$\mathbf{p}_0 = \mathbf{v}, \quad \mathbf{p}_1 = \frac{2}{\beta-\alpha}(\mathbf{A} - \frac{\alpha+\beta}{2}\mathbf{I})\mathbf{v}$$
+   $$\mathbf{p}_{j+1} = \frac{4}{\beta-\alpha}(\mathbf{A} - \frac{\alpha+\beta}{2}\mathbf{I})\mathbf{p}_j - \mathbf{p}_{j-1}$$
+   其中 $[\alpha, \beta]$ 包含 $\mathbf{A}$ 的谱
+
+**CA-GMRES详细算法**：
+
+```
+输入：A, b, s（步数）
+1. r₀ = b - Ax₀, β = ‖r₀‖, v₁ = r₀/β
+2. for k = 0, s, 2s, ... until convergence:
+   // 计算s个基向量
+   3. [Vₖ, Bₖ] = MatrixPowers(A, vₖ₊₁, s)
+   4. // Bₖ是变基矩阵，满足AVₖ = Vₖ₊₁Bₖ
+   
+   // 正交化（使用TSQR）
+   5. [Qₖ, Rₖ] = TSQR([Vₖ₊₁[:, 0], Vₖ])
+   6. Hₖ = Rₖ₊₁[:s+1, 1:s+1]⁻¹ * Rₖ₊₁[:s+1, 0]
+   
+   // 求解最小二乘问题
+   7. yₖ = argmin ‖βe₁ - Hₖy‖
+   8. xₖ₊ₛ = xₖ + Vₖyₖ
+```
 
 **CA-CG（Communication-Avoiding Conjugate Gradient）**：
-- 重组 $s$ 步CG迭代，减少内积计算的全局通信
-- 使用三项递推关系计算 $\mathbf{A}^k\mathbf{p}$
-- 数值稳定性通过残差替换技术保证
+
+标准CG每步需要2次内积（全局通信），CA-CG将 $s$ 步的 $2s$ 次通信减少到 $O(1)$ 次。
+
+关键技术：
+1. **向量递推的矩阵化**：
+   $$[\mathbf{p}_k, \mathbf{p}_{k+1}, ..., \mathbf{p}_{k+s-1}] = [\mathbf{p}_k, \mathbf{r}_k] \mathbf{B}_k$$
+   其中 $\mathbf{B}_k$ 是 $2 \times s$ 的系数矩阵
+
+2. **Gram矩阵预计算**：
+   $$\mathbf{G}_k = \begin{bmatrix}
+   \mathbf{V}_k^T\mathbf{V}_k & \mathbf{V}_k^T\mathbf{A}\mathbf{V}_k \\
+   (\mathbf{A}\mathbf{V}_k)^T\mathbf{V}_k & (\mathbf{A}\mathbf{V}_k)^T\mathbf{A}\mathbf{V}_k
+   \end{bmatrix}$$
+   一次通信计算所有需要的内积
+
+3. **数值稳定性保障**：
+   - 残差替换：每 $s$ 步显式计算 $\mathbf{r} = \mathbf{b} - \mathbf{A}\mathbf{x}$
+   - 自适应 $s$：监控基向量的条件数，必要时减小 $s$
+
+**CA-LU分解**
+
+将LU分解重组为块算法，减少同步点：
+
+1. **锦标赛旋转（Tournament Pivoting）**：
+   - 并行搜索每个处理器的局部最大元
+   - 通过锦标赛树确定全局主元
+   - 通信复杂度：$O(\log P)$ 而非 $O(n)$
+
+2. **块消元**：
+   ```
+   将矩阵分成 b×b 的块
+   for k = 0 to n/b-1:
+       // 因子化对角块（使用tournament pivoting）
+       [Lₖₖ, Uₖₖ] = LU(Aₖₖ)
+       
+       // 更新块列和块行
+       Lₖ,ₖ₊₁:ₙ/ᵦ = Aₖ,ₖ₊₁:ₙ/ᵦ × Uₖₖ⁻¹
+       Uₖ₊₁:ₙ/ᵦ,ₖ = Lₖₖ⁻¹ × Aₖ₊₁:ₙ/ᵦ,ₖ
+       
+       // Schur补更新（可以使用CA矩阵乘法）
+       Aₖ₊₁:ₙ/ᵦ,ₖ₊₁:ₙ/ᵦ -= Lₖ₊₁:ₙ/ᵦ,ₖ × Uₖ,ₖ₊₁:ₙ/ᵦ
+   ```
+
+**2.5D算法：内存与通信的最优权衡**
+
+当可用内存大于最小需求时，可以通过数据复制进一步减少通信：
+
+对于矩阵乘法，使用 $c$ 倍的内存副本：
+- 处理器组织：$P/c^{1/2} \times P/c^{1/2} \times c$
+- 每层存储 $\mathbf{A}$ 和 $\mathbf{B}$ 的不同块
+- 通信量：$O(n^2/\sqrt{cP})$
+- 当 $c = P^{1/3}$ 时，达到 $O(n^2/P^{2/3})$ 的3D算法下界
+
+**实际应用中的挑战与解决方案**：
+
+1. **稀疏矩阵的CA算法**：
+   - 预计算通信模式避免运行时开销
+   - 使用图分割minimized通信量
+   - Hypergraph模型优化数据分布
+
+2. **自适应CA算法**：
+   - 监控通信/计算比率
+   - 动态调整 $s$ 值
+   - 基于网络拥塞切换算法
+
+3. **混合精度CA算法**：
+   - 高精度通信，低精度局部计算
+   - 迭代精化恢复精度
+   - 特别适合GPU等架构
+
+**性能建模与优化**：
+
+CA算法的加速比可以建模为：
+$$S = \frac{T_{\text{classic}}}{T_{\text{CA}}} = \frac{\gamma n^3/P + \beta n^2/\sqrt{P} + \alpha n \log P}{\gamma n^3/P \cdot (1+\delta) + \beta n^2/\sqrt{P} + \alpha n/s \log P}$$
+
+其中 $\delta$ 是CA算法的计算开销因子（通常 $< 0.2$）。
+
+当 $\alpha n \log P \gg \beta n^2/\sqrt{P}$（延迟主导）时，CA算法可以获得接近 $s$ 倍的加速。
 
 ### 8.1.4 异构系统中的负载均衡
 
