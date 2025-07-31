@@ -39,6 +39,18 @@ $$\mathcal{Y} = \mathcal{X} \times_n \mathbf{U} \Leftrightarrow \mathbf{Y}_{(n)}
 
 张量元素 $r_{uit}$ 表示用户 $u$ 在时间段 $t$ 对物品 $i$ 的评分或隐式反馈。
 
+**张量构建的关键决策**：
+
+1. **时间离散化策略**：
+   - **固定窗口**：将连续时间划分为等长区间
+   - **自适应窗口**：根据交互密度动态调整窗口大小
+   - **多尺度建模**：同时维护小时、天、周等多个粒度的张量
+
+2. **缺失值处理**：
+   - **显式缺失**：未观测位置不参与计算
+   - **隐式负反馈**：采用加权策略，$w_{uit} = \alpha + \beta \cdot \text{confidence}_{uit}$
+   - **时间衰减填充**：$\hat{r}_{uit} = \sum_{s<t} \gamma^{t-s} r_{uis}$
+
 时间粒度的选择至关重要：
 - **细粒度**（小时级）：捕获日内模式，如午餐时段的外卖推荐
 - **中粒度**（天级）：捕获周内模式，如周末vs工作日的差异
@@ -48,6 +60,21 @@ $$\mathcal{Y} = \mathcal{X} \times_n \mathbf{U} \Leftrightarrow \mathbf{Y}_{(n)}
 - **循环时间编码**：将时间映射到周期空间，如 $(\sin(2\pi t/T), \cos(2\pi t/T))$
 - **多尺度融合**：同时建模多个时间粒度，使用耦合张量分解
 - **时间衰减权重**：$w_t = \exp(-\lambda(t_{\text{now}} - t))$ 强调近期交互
+- **变点检测**：自动识别用户行为模式的突变点
+- **季节性分解**：$\mathcal{R} = \mathcal{R}_{\text{trend}} + \mathcal{R}_{\text{seasonal}} + \mathcal{R}_{\text{residual}}$
+
+**时间张量的特殊结构**：
+
+1. **Toeplitz结构**：当交互模式具有时间不变性时
+   $$\mathcal{R}_{:,:,t} \approx f(\mathcal{R}_{:,:,t-1}, \mathcal{R}_{:,:,t-2}, ...)$$
+
+2. **低秩加稀疏分解**：
+   $$\mathcal{R} = \mathcal{L} + \mathcal{S}$$
+   其中 $\mathcal{L}$ 捕获稳定模式，$\mathcal{S}$ 捕获异常事件（如促销、节假日）
+
+3. **动态张量补全**：
+   $$\min_{\mathcal{X}} \|\mathcal{P}_\Omega(\mathcal{X} - \mathcal{R})\|_F^2 + \lambda_1\|\mathcal{X}\|_* + \lambda_2\sum_{t}\|\mathcal{X}_{:,:,t} - \mathcal{X}_{:,:,t-1}\|_F^2$$
+   第三项强制时间平滑性。
 
 **案例2：多模态内容推荐**
 对于包含文本、图像、视频的多模态物品，构建四阶张量：
@@ -58,6 +85,37 @@ $$\mathcal{X} \in \mathbb{R}^{|\mathcal{U}| \times |\mathcal{I}| \times |\mathca
 - **早期融合**：在张量层面直接建模多模态交互
 - **晚期融合**：分别对每个模态进行张量分解，然后融合结果
 - **注意力机制**：学习用户对不同模态的偏好权重
+
+**多模态张量的构建方法**：
+
+1. **特征对齐**：
+   - 使用预训练模型（CLIP、BERT等）提取统一维度的特征
+   - 跨模态对齐：$\mathbf{f}_{\text{aligned}} = \text{CCA}(\mathbf{f}_{\text{text}}, \mathbf{f}_{\text{image}})$
+   - 维度规范化：将不同模态映射到相同的特征空间
+
+2. **模态交互建模**：
+   $$\mathcal{X}_{uimf} = \sum_{k=1}^{K} \alpha_{umk} \cdot \beta_{ik} \cdot \gamma_{fk}$$
+   其中 $\alpha_{umk}$ 表示用户 $u$ 对模态 $m$ 中第 $k$ 个潜在因子的偏好。
+
+3. **缺失模态处理**：
+   - **零填充**：简单但可能引入偏差
+   - **均值填充**：使用同类物品的平均特征
+   - **生成填充**：训练跨模态生成模型填补缺失
+
+**高级建模技巧**：
+
+1. **模态特定的正则化**：
+   $$\mathcal{L} = \|\mathcal{X} - \hat{\mathcal{X}}\|_F^2 + \sum_{m} \lambda_m \mathcal{R}_m(\mathbf{U}^{(m)})$$
+   其中 $\mathcal{R}_m$ 是模态特定的正则化器（如文本的稀疏性、图像的平滑性）。
+
+2. **分层张量结构**：
+   - 顶层：用户-物品-模态交互
+   - 中层：模态内的特征交互
+   - 底层：原始特征表示
+
+3. **动态模态选择**：
+   根据用户历史行为动态调整不同模态的重要性：
+   $$w_{um}^{(t)} = \frac{\exp(\mathbf{u}_u^T \mathbf{m}_m + b_{um}^{(t)})}{\sum_{m'} \exp(\mathbf{u}_u^T \mathbf{m}_{m'} + b_{um'}^{(t)})}$$
 
 **案例3：社交推荐网络**
 五阶张量建模 "谁-什么-何时-何地-与谁"：
@@ -72,6 +130,36 @@ $$\mathcal{Y} \in \mathbb{R}^{|\mathcal{U}| \times |\mathcal{I}| \times |\mathca
 - 工作地点的午餐选择 vs 家附近的晚餐选择
 - 周末聚会的音乐品味 vs 日常通勤的播放列表
 
+**社交张量的特殊挑战**：
+
+1. **超高维数的处理**：
+   - 维度诅咒加剧：$O(\prod_{i=1}^{5} d_i)$ 的参数量
+   - 解决方案：使用张量列车分解（Tensor Train Decomposition）
+   $$\mathcal{Y}_{i_1,i_2,i_3,i_4,i_5} \approx \mathbf{G}_1(i_1)\mathbf{G}_2(i_2)\mathbf{G}_3(i_3)\mathbf{G}_4(i_4)\mathbf{G}_5(i_5)$$
+   其中 $\mathbf{G}_k$ 是三阶核张量（除了边界）。
+
+2. **社交影响力建模**：
+   $$r_{uitlg} = \alpha \cdot r_{uit}^{\text{personal}} + \beta \cdot \sum_{v \in g} w_{uv} \cdot r_{vit}^{\text{social}}$$
+   其中 $w_{uv}$ 是社交影响力权重，可以通过图神经网络学习。
+
+3. **群体决策建模**：
+   - **平均策略**：$\hat{r}_g = \frac{1}{|g|}\sum_{u \in g} r_u$
+   - **最小痛苦策略**：$\hat{r}_g = \min_{u \in g} r_u$
+   - **灵活权衡**：$\hat{r}_g = \prod_{u \in g} r_u^{\theta_u}$，其中 $\theta_u$ 是用户在群体中的决策权重
+
+4. **时空依赖性**：
+   $$P(\text{visit } l | u, t, g) = \frac{\exp(\mathbf{u}_u^T \mathbf{l}_l + \mathbf{t}_t^T \mathbf{l}_l + \sum_{v \in g} \mathbf{v}_v^T \mathbf{l}_l)}{\sum_{l'} \exp(\cdot)}$$
+
+**高效近似方法**：
+
+1. **分层分解**：
+   - 先分解低阶子张量：$\mathcal{Y}_{:,:,:} = \text{CP}(\mathcal{U}, \mathcal{I}, \mathcal{T})$
+   - 再建模高阶交互：$\mathcal{Y}_{:,:,:,l,g} = f(\mathcal{Y}_{:,:,:}, \mathbf{L}_l, \mathbf{G}_g)$
+
+2. **采样策略**：
+   - 重要性采样：根据交互频率采样
+   - 负采样：从未观测的维度组合中采样
+
 **案例4：多任务学习张量**
 对于需要同时优化多个目标的推荐系统（点击率、转化率、停留时间等）：
 $$\mathcal{Z} \in \mathbb{R}^{|\mathcal{U}| \times |\mathcal{I}| \times |\mathcal{T}| \times |\mathcal{O}|}$$
@@ -81,9 +169,54 @@ $$\mathcal{Z} \in \mathbb{R}^{|\mathcal{U}| \times |\mathcal{I}| \times |\mathca
 - 通过张量分解实现多任务知识共享
 - 为不同业务目标动态调整推荐策略
 
+**多任务张量分解的数学框架**：
+
+1. **联合优化目标**：
+   $$\min_{\{\mathbf{U}^{(n,o)}\}} \sum_{o \in \mathcal{O}} \lambda_o \|\mathcal{Z}_{:,:,:,o} - \text{CP}(\mathbf{U}^{(1,o)}, \mathbf{U}^{(2,o)}, \mathbf{U}^{(3,o)})\|_F^2$$
+   
+   其中部分因子矩阵在任务间共享：
+   $$\mathbf{U}^{(n,o)} = \mathbf{U}^{(n)}_{\text{shared}} + \mathbf{U}^{(n,o)}_{\text{specific}}$$
+
+2. **任务相关性建模**：
+   $$\mathbf{R}_{\mathcal{O}} = \text{corr}(\mathcal{Z}_{:,:,:,o_1}, \mathcal{Z}_{:,:,:,o_2})$$
+   
+   使用任务相关性矩阵指导共享程度：
+   - 高相关任务：更多共享参数
+   - 负相关任务：独立参数或对抗学习
+
+3. **Pareto最优平衡**：
+   不同于简单的加权和，寻找Pareto最优解：
+   $$\mathcal{P} = \{\theta : \nexists \theta' \text{ s.t. } L_o(\theta') \leq L_o(\theta) \, \forall o \text{ and } L_{o'}(\theta') < L_{o'}(\theta) \text{ for some } o'\}$$
+
+4. **动态权重调整**：
+   $$\lambda_o^{(t)} = \lambda_o^{(0)} \cdot \exp\left(-\frac{\nabla L_o}{\|\nabla L_o\|_2}\right)$$
+   
+   梯度范数较大的任务获得更高权重。
+
+**实际应用中的优化技巧**：
+
+1. **分阶段训练**：
+   - 阶段1：独立训练各任务获得初始化
+   - 阶段2：联合微调共享参数
+   - 阶段3：精细调整任务特定参数
+
+2. **不确定性量化**：
+   使用贝叶斯张量分解量化预测不确定性：
+   $$p(\mathcal{Z}|\mathcal{X}) = \int p(\mathcal{Z}|\mathcal{U})p(\mathcal{U}|\mathcal{X})d\mathcal{U}$$
+
+3. **在线更新**：
+   当新任务加入时，仅更新相关的张量切片：
+   $$\mathcal{Z}_{:,:,:,o_{\text{new}}} = \text{transfer\_learning}(\mathcal{Z}_{:,:,:,o_{\text{similar}}})$$
+
 ### 16.1.4 稀疏性挑战与机遇
 
 推荐系统中的张量极度稀疏，观测率通常低于 0.01%。这带来了计算和统计两方面的挑战：
+
+**稀疏性的根本原因**：
+1. **长尾分布**：大部分用户只与少数物品交互
+2. **时空局部性**：用户在特定时间和地点的活动有限
+3. **选择性偏差**：用户倾向于与感兴趣的内容交互
+4. **平台限制**：推荐系统只展示有限选项
 
 **计算挑战**：
 - 存储开销：稠密存储不现实
@@ -119,6 +252,11 @@ $$\mathcal{Z} \in \mathbb{R}^{|\mathcal{U}| \times |\mathcal{I}| \times |\mathca
    成功恢复需要张量的奇异向量不能过度集中：
    $$\mu(\mathcal{X}) = \max_i \frac{n}{r} \|\mathbf{u}_i\|_\infty^2 \leq \mu_0$$
    高相干性（如某些用户特别活跃）会增加恢复难度。
+   
+   **相干性的实际含义**：
+   - **低相干性**：信息均匀分布，易于恢复
+   - **高相干性**：信息集中在少数维度，难以恢复
+   - **处理方法**：重加权采样、正则化约束
 
 **实用的稀疏性处理策略**：
 
