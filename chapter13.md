@@ -55,6 +55,12 @@ $$R_T \leq O(k\log T \cdot \sum_{j=k+1}^n \lambda_j(\mathbf{A}_T))$$
 2. 通过telescoping sum技术累积误差界
 3. 应用在线学习的regret分析框架
 
+**详细证明思路**：
+设$\mathbf{E}_t = \tilde{\mathbf{A}}_t - \mathbf{A}_t^{(k)}$为时刻$t$的额外误差。关键观察是：
+$$\|\mathbf{E}_t\|_F^2 \leq \|\mathbf{E}_{t-1}\|_F^2 + 2\langle\mathbf{E}_{t-1}, \Delta_t\rangle + \|\Delta_t\|_F^2$$
+
+其中$\Delta_t$是时刻$t$的更新。通过精心选择更新策略，可以控制交叉项$\langle\mathbf{E}_{t-1}, \Delta_t\rangle$。
+
 **更细致的性能度量**：
 
 **相对误差**：
@@ -66,10 +72,40 @@ $$d_{\text{sub}}(\mathbf{U}_t, \tilde{\mathbf{U}}_t) = \|\mathbf{U}_t\mathbf{U}_
 **投影误差**（应用导向）：
 $$\text{ProjErr}_t = \mathbb{E}_{\mathbf{x}}[\|\mathbf{x} - \tilde{\mathbf{U}}_t\tilde{\mathbf{U}}_t^T\mathbf{x}\|^2]$$
 
+**Grassmannian距离**（几何视角）：
+$$d_{\text{Grass}}(\mathbf{U}_t, \tilde{\mathbf{U}}_t) = \left(\sum_{i=1}^k \theta_i^2\right)^{1/2}$$
+其中$\theta_i$是两个子空间之间的主角。
+
 **定理13.2**（子空间追踪）：在温和条件下，
 $$d_{\text{sub}}(\mathbf{U}_t, \tilde{\mathbf{U}}_t) \leq \frac{C}{\lambda_k(\mathbf{A}_t) - \lambda_{k+1}(\mathbf{A}_t)} \cdot \text{err}_t$$
 
 其中分母是特征值间隙，决定了子空间分离的难度。
+
+**实际含义**：
+- 特征值间隙大 → 子空间稳定，易追踪
+- 特征值间隙小 → 子空间混淆，难分离
+- 退化情况（$\lambda_k = \lambda_{k+1}$）需特殊处理
+
+**高阶误差分析**：
+
+对于有限精度计算，总误差由三部分组成：
+1. **近似误差**：$\epsilon_{\text{approx}} = \|\mathbf{A}_t - \mathbf{A}_t^{(k)}\|_F$
+2. **算法误差**：$\epsilon_{\text{algo}} = \|\mathbf{A}_t^{(k)} - \tilde{\mathbf{A}}_t^{\text{exact}}\|_F$
+3. **舍入误差**：$\epsilon_{\text{round}} = \|\tilde{\mathbf{A}}_t^{\text{exact}} - \tilde{\mathbf{A}}_t^{\text{float}}\|_F$
+
+**定理13.3**（总误差界）：在IEEE双精度下，
+$$\|\mathbf{A}_t - \tilde{\mathbf{A}}_t\|_F \leq \epsilon_{\text{approx}} + O(\sqrt{k\log t})\sigma_{k+1} + O(t \cdot \epsilon_{\text{machine}})\|\mathbf{A}_t\|_F$$
+
+这给出了精度、秩选择和运行时间的三方权衡。
+
+**实用性能基准**：
+
+| 度量 | 优秀 | 良好 | 需改进 |
+|------|------|------|--------|
+| 相对误差 | < 1% | 1-5% | > 5% |
+| 子空间距离 | < 0.1 | 0.1-0.3 | > 0.3 |
+| 每样本时间 | < 10μs | 10-100μs | > 100μs |
+| 内存开销 | < 2nk | 2-5nk | > 5nk |
 
 ### 13.1.3 基础增量框架
 
@@ -150,6 +186,13 @@ $$\mathbf{U}_{t+1} = \mathbf{U}_t + \eta_t(\mathbf{x}_t\mathbf{x}_t^T - \mathbf{
 - 步长$\eta_t = c/t$时，$\mathbb{E}[\|\mathbf{U}_t\mathbf{U}_t^T - \mathbf{U}_*\mathbf{U}_*^T\|_F^2] = O(1/t)$
 - 需要特征值间隙条件：$\lambda_k > \lambda_{k+1}$
 
+**Oja算法的几何解释**：
+Oja更新可分解为两步：
+1. **Hebbian项**：$\mathbf{x}_t\mathbf{x}_t^T\mathbf{U}_t$增强$\mathbf{x}_t$方向
+2. **正交化项**：$-\mathbf{U}_t\mathbf{U}_t^T\mathbf{x}_t\mathbf{x}_t^T\mathbf{U}_t$保持列正交
+
+这种"增强-正交化"模式在神经科学中有对应：Hebbian学习与侧向抑制。
+
 **推广：在线矩阵流形优化**
 
 考虑Stiefel流形约束：$\mathbf{U}^T\mathbf{U} = \mathbf{I}_k$
@@ -164,22 +207,60 @@ $$\mathbf{U}_{t+1} = \mathbf{U}_t + \eta_t(\mathbf{x}_t\mathbf{x}_t^T - \mathbf{
 其中Retraction可选：
 - QR分解：$\text{Retr}(\mathbf{U}, \boldsymbol{\xi}) = \text{qr}(\mathbf{U} + \boldsymbol{\xi})$
 - Cayley变换：计算更精确但更昂贵
+- 指数映射：$\text{exp}_{\mathbf{U}}(\boldsymbol{\xi}) = [\mathbf{U}, \mathbf{Q}]\exp\left(\begin{bmatrix}\mathbf{U}^T\boldsymbol{\xi} \\ -\boldsymbol{\xi}^T\mathbf{U}\end{bmatrix}\right)\begin{bmatrix}\mathbf{I}_k \\ \mathbf{0}\end{bmatrix}$
+
+**在线镜像下降视角**：
+
+定义Bregman散度：
+$$D_\phi(\mathbf{U}, \mathbf{V}) = \phi(\mathbf{U}) - \phi(\mathbf{V}) - \langle\nabla\phi(\mathbf{V}), \mathbf{U} - \mathbf{V}\rangle$$
+
+选择合适的$\phi$可得到不同算法：
+- $\phi(\mathbf{U}) = \frac{1}{2}\|\mathbf{U}\|_F^2$：标准梯度下降
+- $\phi(\mathbf{U}) = -\log\det(\mathbf{U}^T\mathbf{U})$：自然梯度
+- $\phi(\mathbf{U}) = \text{tr}(\mathbf{U}^T\mathbf{U}\log(\mathbf{U}^T\mathbf{U}))$：矩阵熵
+
+**加速方法**：
+
+**动量加速Oja**：
+$$\begin{aligned}
+\mathbf{V}_{t+1} &= \beta\mathbf{V}_t + (1-\beta)\nabla_{\mathbf{U}}\ell_t(\mathbf{U}_t) \\
+\mathbf{U}_{t+1} &= \mathbf{U}_t - \eta_t\mathbf{V}_{t+1}
+\end{aligned}$$
+
+**Nesterov加速变体**：
+$$\begin{aligned}
+\mathbf{Y}_t &= \mathbf{U}_t + \frac{t-1}{t+2}(\mathbf{U}_t - \mathbf{U}_{t-1}) \\
+\mathbf{U}_{t+1} &= \mathbf{Y}_t - \eta_t\nabla\ell_t(\mathbf{Y}_t)
+\end{aligned}$$
 
 **与经典在线算法的对比**：
 
-| 算法 | 更新复杂度 | 收敛率 | 约束处理 |
-|------|-----------|--------|----------|
-| Oja's rule | $O(nk)$ | $O(1/t)$ | 渐近满足 |
-| 在线梯度下降 | $O(nk)$ | $O(\sqrt{T})$ | 投影步 |
-| Riemannian SGD | $O(nk^2)$ | $O(1/t)$ | 精确满足 |
-| Block power | $O(nkb)$ | $O(1/t^2)$ | 渐近满足 |
+| 算法 | 更新复杂度 | 收敛率 | 约束处理 | 内存需求 |
+|------|-----------|--------|----------|----------|
+| Oja's rule | $O(nk)$ | $O(1/t)$ | 渐近满足 | $O(nk)$ |
+| 在线梯度下降 | $O(nk)$ | $O(\sqrt{T})$ | 投影步 | $O(nk)$ |
+| Riemannian SGD | $O(nk^2)$ | $O(1/t)$ | 精确满足 | $O(nk)$ |
+| Block power | $O(nkb)$ | $O(1/t^2)$ | 渐近满足 | $O(nkb)$ |
+| SVRG-style | $O(nk)$ | $O(1/t^2)$ | 投影步 | $O(nk)$ |
+
+**在线核PCA扩展**：
+
+映射到RKHS空间$\phi: \mathbb{R}^n \rightarrow \mathcal{H}$：
+$$\min_{\mathbf{U}} \sum_{t=1}^T \|\phi(\mathbf{x}_t) - \mathbf{U}\mathbf{U}^T\phi(\mathbf{x}_t)\|_{\mathcal{H}}^2$$
+
+使用核技巧避免显式映射：
+- 维护核矩阵的低秩近似
+- 增量更新特征向量系数
+- Nyström近似加速计算
 
 **研究方向**：
 - 非凸在线优化的收敛性分析
-- 自适应步长的理论保证
+- 自适应步长的理论保证（AdaGrad/Adam变体）
 - 分布式流式PCA的通信复杂度下界
 - 带约束的在线矩阵分解（如非负、稀疏）
 - 量子算法加速的可能性
+- 对抗性扰动下的鲁棒性分析
+- 与强化学习中表示学习的联系
 
 ## 13.2 增量SVD算法深度剖析
 
@@ -244,6 +325,30 @@ $$\frac{\|\tilde{\mathbf{A}}' - \mathbf{A}'\|_F}{\|\mathbf{A}'\|_F} \leq \epsilo
 - 迭代refinement技术
 - 基于条件数的自适应重计算
 
+**稳定性分析的深入考察**：
+
+**浮点误差传播模型**：
+设$\epsilon_m$为机器精度，第$t$步后的误差界：
+$$E_t \leq E_0 \cdot \kappa^t + \epsilon_m \cdot \frac{\kappa^t - 1}{\kappa - 1}$$
+
+其中$\kappa = \sigma_1/\sigma_k$是条件数。这表明：
+- 条件数越大，误差增长越快
+- 需要在$t \approx 1/\epsilon_m$步前重计算
+
+**自适应重正交化策略**：
+```
+定义正交性损失：δ = ‖UᵀU - I‖_F
+触发条件：
+1. δ > τ_orth (典型值：10⁻⁸)
+2. 更新次数达到N_max = ⌊1/(10·ε_machine)⌋
+3. 条件数激增：κ(t)/κ(0) > 100
+```
+
+**混合精度技术**：
+- 关键运算（如内积）使用高精度
+- 存储使用低精度节省内存
+- 误差补偿算法（Kahan求和）
+
 **完整的Brand算法实现细节**：
 
 ```
@@ -280,6 +385,43 @@ function updateSVD(U, Σ, V, c):
         Σ_new = Σ'
     
     return U_new, Σ_new, V_new
+```
+
+**高级实现技巧**：
+
+**1. 延迟更新策略**：
+```
+维护缓冲区B存储待处理更新
+if size(B) < batch_size:
+    B.append(c)
+else:
+    // 批量更新
+    [Q_B, R_B] = qr(B)
+    K = [Σ     UᵀQ_B·R_B]
+        [0  Q_B'ᵀQ_B·R_B]
+    执行块更新
+    清空B
+```
+
+**2. 自适应阈值选择**：
+```
+ε_threshold = max(
+    ε_abs,                    // 绝对阈值
+    ε_rel · ‖c‖,             // 相对阈值
+    √(ε_machine) · σ_k        // 数值阈值
+)
+```
+
+**3. 增量正交化**：
+使用修正Gram-Schmidt的增量版本：
+```
+for j = 1:k:
+    α_j = u_j'p
+    p = p - α_j·u_j
+    // 二次修正提高精度
+    β_j = u_j'p
+    p = p - β_j·u_j
+    m[j] = m[j] + β_j
 ```
 
 **正交化策略比较**：
@@ -399,6 +541,18 @@ function blockUpdateSVD(U, Σ, V, C, D):
 - 通信与精度的权衡
 - 拜占庭节点的鲁棒性
 
+**理论分析**：
+
+**定理13.4**（分布式收敛性）：设$m$个节点，通信周期$\tau$，则：
+$$\mathbb{E}[\|\mathbf{U}_T - \mathbf{U}_*\|_F] \leq O\left(\frac{\sqrt{m\tau}}{T} + \frac{1}{\sqrt{mT}}\right)$$
+
+第一项来自通信延迟，第二项来自分布式平均。
+
+**通信复杂度下界**：
+**定理13.5**：任何$\epsilon$-近似分布式PCA算法需要至少$\Omega(mk\log(1/\epsilon))$比特通信。
+
+证明基于信息论：每个节点需传递足够信息以重构全局主成分。
+
 **分布式架构详解**：
 
 ```
@@ -516,12 +670,68 @@ function byzantine_robust_aggregation(sketches, f):
     return robust_mean
 ```
 
+**高级通信协议**：
+
+**1. 渐进式精度协议**：
+```
+初始阶段：交换低精度sketch (1-2 bits)
+中期阶段：提高到中等精度 (8-16 bits)
+最终阶段：全精度交换关键成分
+优势：早期快速收敛，后期精确对齐
+```
+
+**2. 异步Gossip SVD**：
+```
+每个节点维护邻居列表N(i)
+随机选择邻居j ∈ N(i)
+交换并平均子空间：
+  U_i^new = geodesic_mean(U_i, U_j)
+  U_j^new = U_i^new
+收敛速度：O(log m / λ₂(G))
+```
+
+其中$\lambda_2(G)$是通信图的第二大特征值。
+
+**3. 分层聚合树**：
+```
+叶节点：本地SVD更新
+中间节点：合并子树结果
+根节点：全局SVD
+优势：通信复杂度O(log m)
+缺点：单点故障风险
+```
+
+**实际系统考虑**：
+
+**带宽感知调度**：
+- 测量节点间带宽：$B_{ij}$
+- 优先高带宽链路通信
+- 自适应调整通信频率
+
+**容错机制**：
+```
+function robustAggregation(sketches):
+    // 检测异常值
+    median = geometric_median(sketches)
+    deviations = [distance(s, median) for s in sketches]
+    
+    // 移除异常
+    threshold = median(deviations) * 3
+    valid = [s for s,d in zip(sketches, deviations) if d < threshold]
+    
+    // 加权聚合
+    weights = [1/d for d in valid_deviations]
+    return weighted_mean(valid, weights)
+```
+
 **研究方向**：
 - 基于草图的分布式SVD通信压缩
 - 去中心化共识SVD算法
 - 异构数据分布下的理论分析
 - 动态网络拓扑下的适应性算法
 - 差分隐私保护的分布式PCA
+- 联邦学习框架下的安全SVD
+- 量子通信加速的可能性
 
 ## 13.3 自适应秩选择
 
@@ -552,6 +762,67 @@ $$R_k(T) = \sum_{t=1}^T \|\mathbf{A}_t - \tilde{\mathbf{A}}_{t,k_t}\|_F^2 - \min
 $$\mathbb{E}[R_k(T)] \leq O(\sqrt{T\log K})$$
 其中$K$是最大允许秩。
 
+**证明思路**：
+使用在线学习的expert advice框架：
+1. 将每个可能的秩$k \in \{1, ..., K\}$视为expert
+2. 使用exponential weights算法选择秩
+3. 利用能量集中性质得到更紧的界
+
+**实用增强版本**：
+
+**动态阈值调整**：
+```
+function adaptThreshold(τ, history):
+    // 计算近期重构误差
+    recent_error = mean(history[-window:])
+    
+    // 误差趋势分析
+    if increasing_trend(history):
+        τ = min(τ + Δτ, 0.99)  // 需要更多能量
+    elif stable_low_error(history):
+        τ = max(τ - Δτ, 0.90)  // 可以减少能量
+    
+    return τ
+```
+
+**多尺度能量分析**：
+```
+function multiScaleEnergy(σ_values):
+    scales = [1, 5, 10, 20]  // 不同观察尺度
+    energy_profiles = []
+    
+    for s in scales:
+        // 计算前s个奇异值的能量比
+        E_s = sum(σ²[1:s]) / sum(σ²)
+        energy_profiles.append(E_s)
+    
+    // 检测“肘部”位置
+    k_elbow = detectElbow(energy_profiles)
+    return k_elbow
+```
+
+**噪声鲁棒性考虑**：
+
+当数据包含噪声时，需要避免过拟合：
+
+**Marcenko-Pastur律应用**：
+对于随机矩阵，奇异值分布遍循：
+$$\rho(\sigma) = \frac{1}{2\pi\sigma c}\sqrt{(\sigma_+ - \sigma)(\sigma - \sigma_-)}$$
+
+其中$\sigma_\pm = (1 \pm \sqrt{c})^2$，$c = n/T$。
+
+**噪声阈值策略**：
+```
+function noiseAwareRank(σ_values, n, T):
+    c = n/T
+    σ_threshold = (1 + √c)² * noise_level
+    
+    // 只保留显著大于噪声的奇异值
+    k = sum(σ_values > σ_threshold)
+    
+    return max(k, 1)  // 至少保留一个
+```
+
 ### 13.3.3 基于预测的秩选择
 
 利用奇异值衰减模式预测未来：
@@ -570,6 +841,82 @@ $$\mathbb{E}[R_k(T)] \leq O(\sqrt{T\log K})$$
 4. 使用滑动窗口更新参数估计
 ```
 
+**详细的参数估计方法**：
+
+**1. 幂律模型的在线估计**：
+```
+function estimatePowerLaw(σ_history):
+    // 取对数变换
+    log_i = log(1:length(σ))
+    log_σ = log(σ)
+    
+    // 加权最小二乘
+    weights = 1./sqrt(1:length(σ))  // 前面的奇异值更重要
+    α = -weightedLeastSquares(log_i, log_σ, weights)
+    
+    // 鲁棒性检查
+    residuals = log_σ - (-α * log_i)
+    if max(abs(residuals)) > threshold:
+        // 使用Huber回归
+        α = huberRegression(log_i, log_σ)
+    
+    return α
+```
+
+**2. 指数模型的自适应估计**：
+```
+function estimateExponential(σ_history, window):
+    // 使用最近的window个点
+    recent_σ = σ_history[-window:]
+    
+    // MLE估计
+    β_mle = 1 / mean(recent_σ)
+    
+    // 贝叶斯更新（结合先验）
+    prior_mean = 1 / median(σ_history)
+    prior_weight = 0.1
+    
+    β = (1-prior_weight) * β_mle + prior_weight * prior_mean
+    
+    return β
+```
+
+**3. 混合模型识别**：
+```
+function identifyDecayPattern(σ):
+    // 计算不同模型的拟合度
+    power_fit = fitPowerLaw(σ)
+    exp_fit = fitExponential(σ)
+    mixed_fit = fitMixedModel(σ)
+    
+    // AIC准则选择
+    aic_power = AIC(power_fit, σ)
+    aic_exp = AIC(exp_fit, σ)
+    aic_mixed = AIC(mixed_fit, σ)
+    
+    return argmin([aic_power, aic_exp, aic_mixed])
+```
+
+**预测误差的理论分析**：
+
+**定理13.6**（预测误差界）：设真实衰减率为$\alpha_*$，估计值为$\hat{\alpha}_t$，则：
+$$\mathbb{E}[\text{PredErr}_t] \leq C_1 \cdot \mathbb{E}[|\hat{\alpha}_t - \alpha_*|] + C_2 \cdot \frac{\log t}{t}$$
+
+第一项来自参数估计误差，第二项来自有限样本效应。
+
+**实用策略：保守选择**：
+```
+function conservativeRankSelection(predicted_k, confidence):
+    // 加入安全边界
+    safety_margin = ceil(predicted_k * (1 - confidence))
+    
+    // 考虑预测不确定性
+    uncertainty = estimatePredictionUncertainty()
+    extra_ranks = ceil(2 * sqrt(uncertainty))
+    
+    return predicted_k + safety_margin + extra_ranks
+```
+
 ### 13.3.4 贝叶斯秩选择
 
 将秩视为隐变量，使用在线贝叶斯推断：
@@ -583,10 +930,102 @@ $$p(\mathbf{A}|k) = \mathcal{MN}(\mathbf{0}, \mathbf{I}_n, \boldsymbol{\Sigma}_k
 2. 使用粒子滤波或变分推断更新
 3. 选择MAP估计或后验期望
 
+**详细的贝叶斯框架**：
+
+**先验设计**：
+```
+// 基于领域知识的先验
+π(k) ∝ k^{-γ} * exp(-λ*k)  // 偏好低秩
+
+// 参数选择
+γ: 控制幂律衰减 (typical: 1-2)
+λ: 控制指数惩罚 (typical: 0.01-0.1)
+```
+
+**似然模型**：
+```
+// 概率性PCA模型
+p(σ²_i | k) = {
+    InverseGamma(α, β), if i ≤ k  // 信号奇异值
+    InverseGamma(α_0, β_0), if i > k  // 噪声奇异值
+}
+
+// 参数学习
+α, β: 从数据中学习
+α_0, β_0: 噪声先验
+```
+
+**在线更新算法**：
+```
+function bayesianRankUpdate(posterior_t, new_data):
+    // 计算每个秩的似然
+    for k in 1:K_max:
+        likelihood[k] = computeLikelihood(new_data, k)
+    
+    // 贝叶斯更新
+    posterior_t+1 = posterior_t .* likelihood
+    posterior_t+1 = posterior_t+1 / sum(posterior_t+1)
+    
+    // 防止数值下溢
+    posterior_t+1 = renormalize(posterior_t+1)
+    
+    return posterior_t+1
+```
+
+**变分推断加速**：
+
+为避免计算所有$K$个可能秩的似然：
+
+```
+function variationalRankInference(data):
+    // 变分分布: q(k) = Categorical(π)
+    π = uniform(K_max)
+    
+    for iter in 1:max_iters:
+        // E-step: 更新秩分布
+        for k in 1:K_max:
+            π[k] ∝ exp(ELBO(data, k))
+        π = normalize(π)
+        
+        // M-step: 更新模型参数
+        updateModelParams(data, π)
+        
+        // 收敛检查
+        if converged(π):
+            break
+    
+    return π
+```
+
+**实时决策策略**：
+
+```
+function selectRank(posterior, risk_aversion):
+    // MAP估计（最激进）
+    k_map = argmax(posterior)
+    
+    // 后验均值（平衡）
+    k_mean = sum(k * posterior[k] for k in 1:K_max)
+    
+    // 风险敏感决策
+    // 最小化预期损失: L(k,k') = |k-k'|^α
+    k_bayes = argmin_k sum(L(k,k') * posterior[k'] for k' in 1:K_max)
+    
+    // 根据风险偏好选择
+    if risk_aversion == "low":
+        return k_map
+    elif risk_aversion == "medium":
+        return k_mean
+    else:
+        return k_bayes
+```
+
 **研究方向**：
-- 非平稳环境下的秩追踪
+- 非平稱环境下的秩追踪
 - 多尺度秩选择（不同时间尺度不同秩）
 - 与在线核学习的联系
+- 分布式贝叶斯推断
+- 非参数贝叶斯方法（Dirichlet Process）
 
 ## 13.4 在线矩阵补全
 
