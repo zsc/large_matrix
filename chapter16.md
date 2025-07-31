@@ -39,10 +39,47 @@ $$\mathcal{Y} = \mathcal{X} \times_n \mathbf{U} \Leftrightarrow \mathbf{Y}_{(n)}
 
 张量元素 $r_{uit}$ 表示用户 $u$ 在时间段 $t$ 对物品 $i$ 的评分或隐式反馈。
 
+时间粒度的选择至关重要：
+- **细粒度**（小时级）：捕获日内模式，如午餐时段的外卖推荐
+- **中粒度**（天级）：捕获周内模式，如周末vs工作日的差异
+- **粗粒度**（周/月级）：捕获季节性趋势和长期兴趣演化
+
+时间建模的高级技巧：
+- **循环时间编码**：将时间映射到周期空间，如 $(\sin(2\pi t/T), \cos(2\pi t/T))$
+- **多尺度融合**：同时建模多个时间粒度，使用耦合张量分解
+- **时间衰减权重**：$w_t = \exp(-\lambda(t_{\text{now}} - t))$ 强调近期交互
+
 **案例2：多模态内容推荐**
 对于包含文本、图像、视频的多模态物品，构建四阶张量：
 $$\mathcal{X} \in \mathbb{R}^{|\mathcal{U}| \times |\mathcal{I}| \times |\mathcal{M}| \times |\mathcal{F}|}$$
 其中 $\mathcal{M}$ 是模态类型，$\mathcal{F}$ 是特征维度。
+
+模态融合的关键考虑：
+- **早期融合**：在张量层面直接建模多模态交互
+- **晚期融合**：分别对每个模态进行张量分解，然后融合结果
+- **注意力机制**：学习用户对不同模态的偏好权重
+
+**案例3：社交推荐网络**
+五阶张量建模 "谁-什么-何时-何地-与谁"：
+$$\mathcal{Y} \in \mathbb{R}^{|\mathcal{U}| \times |\mathcal{I}| \times |\mathcal{T}| \times |\mathcal{L}| \times |\mathcal{G}|}$$
+
+其中：
+- $\mathcal{L}$：地理位置（POI推荐）
+- $\mathcal{G}$：社交群组或共同参与者
+
+这种高阶建模能够捕获复杂的情境依赖：
+- 和朋友一起时的电影偏好 vs 独自观看
+- 工作地点的午餐选择 vs 家附近的晚餐选择
+- 周末聚会的音乐品味 vs 日常通勤的播放列表
+
+**案例4：多任务学习张量**
+对于需要同时优化多个目标的推荐系统（点击率、转化率、停留时间等）：
+$$\mathcal{Z} \in \mathbb{R}^{|\mathcal{U}| \times |\mathcal{I}| \times |\mathcal{T}| \times |\mathcal{O}|}$$
+
+其中 $\mathcal{O}$ 是目标函数集合。这允许：
+- 发现不同目标间的相关性模式
+- 通过张量分解实现多任务知识共享
+- 为不同业务目标动态调整推荐策略
 
 ### 16.1.4 稀疏性挑战与机遇
 
@@ -52,16 +89,58 @@ $$\mathcal{X} \in \mathbb{R}^{|\mathcal{U}| \times |\mathcal{I}| \times |\mathca
 - 存储开销：稠密存储不现实
 - 运算效率：大量零元素参与计算
 - 内存访问：随机访问模式导致cache miss
+- 负载均衡：非零元素分布不均导致并行效率低下
 
 **统计挑战**：
 - 过拟合风险：参数远多于观测
 - 冷启动问题：新用户/物品缺乏数据
 - 负采样偏差：未观测不等于负样本
+- 噪声敏感性：稀疏数据中的异常值影响更大
 
 然而，稀疏性也带来机遇：
 - 低秩假设更可能成立
 - 可利用隐式正则化
 - 计算可大幅优化
+- 支持在线增量学习
+
+**稀疏性的数学视角**：
+
+1. **核范数正则化的隐式偏好**：
+   稀疏观测下的张量补全等价于：
+   $$\min_{\mathcal{X}} \|\mathcal{P}_\Omega(\mathcal{X} - \mathcal{M})\|_F^2 + \lambda \|\mathcal{X}\|_*$$
+   其中 $\|\cdot\|_*$ 是张量核范数，$\mathcal{P}_\Omega$ 是观测位置的投影算子。
+
+2. **采样复杂度界**：
+   对于秩为 $r$ 的 $n_1 \times n_2 \times n_3$ 张量，可靠恢复所需的样本数：
+   $$m \geq C \cdot r \cdot (n_1 + n_2 + n_3) \cdot \log^2(n_1 n_2 n_3)$$
+   这远小于总元素数 $n_1 n_2 n_3$。
+
+3. **相干性（Coherence）条件**：
+   成功恢复需要张量的奇异向量不能过度集中：
+   $$\mu(\mathcal{X}) = \max_i \frac{n}{r} \|\mathbf{u}_i\|_\infty^2 \leq \mu_0$$
+   高相干性（如某些用户特别活跃）会增加恢复难度。
+
+**实用的稀疏性处理策略**：
+
+1. **自适应采样**：
+   - 基于不确定性的主动学习采样
+   - leverage score采样提高信息量
+   - 重要性采样减少方差
+
+2. **辅助信息利用**：
+   - 引入用户/物品特征作为side information
+   - 利用隐式反馈（浏览、收藏等）
+   - 迁移学习从相关域借力
+
+3. **稀疏性感知的优化**：
+   - 只在观测位置计算损失和梯度
+   - 使用coordinate descent减少计算
+   - 采用importance sampling加速收敛
+
+4. **鲁棒性增强**：
+   - Huber损失处理异常值
+   - 矩阵补全的鲁棒PCA扩展
+   - 贝叶斯方法量化不确定性
 
 ## 16.2 CP分解与Tucker分解的可扩展实现
 
@@ -97,6 +176,61 @@ $$\mathbf{A}^{(n)} = \mathbf{X}_{(n)} \mathbf{Z}^{(n)} (\mathbf{V}^{(n)})^{-1}$$
    - Element-wise 并行：划分张量元素
    - Hybrid 并行：结合两种策略
 
+**数值稳定性保证**：
+
+1. **正则化的ALS更新**：
+   $$\mathbf{A}^{(n)} = \mathbf{X}_{(n)} \mathbf{Z}^{(n)} (\mathbf{V}^{(n)} + \lambda \mathbf{I})^{-1}$$
+   
+   选择 $\lambda$ 的自适应策略：
+   - 基于条件数：$\lambda = \epsilon \cdot \sigma_\max(\mathbf{V}^{(n)})$
+   - 基于噪声水平：$\lambda = \sigma^2 / \text{SNR}$
+   - 贝叶斯视角：$\lambda$ 对应先验强度
+
+2. **QR分解稳定化**：
+   当 $\mathbf{V}^{(n)}$ 接近奇异时，使用QR分解：
+   ```
+   [Q, R] = qr([Z^(n); sqrt(λ)I], 0)
+   A^(n) = X_(n) * (Q(1:end-R,:) / R)
+   ```
+
+3. **行归一化策略**：
+   每次迭代后归一化因子矩阵，将尺度吸收到 $\lambda_r$：
+   $$\mathbf{a}_r^{(n)} \leftarrow \frac{\mathbf{a}_r^{(n)}}{\|\mathbf{a}_r^{(n)}\|}, \quad \lambda_r \leftarrow \lambda_r \prod_n \|\mathbf{a}_r^{(n)}\|$$
+
+**收敛加速技术**：
+
+1. **线搜索**：
+   不直接接受ALS更新，而是寻找最优步长：
+   $$\mathbf{A}^{(n)}_{\text{new}} = (1-\alpha)\mathbf{A}^{(n)}_{\text{old}} + \alpha \mathbf{A}^{(n)}_{\text{ALS}}$$
+
+2. **动量方法**：
+   借鉴深度学习的动量技巧：
+   $$\mathbf{V}_t^{(n)} = \beta \mathbf{V}_{t-1}^{(n)} + (1-\beta)\nabla f_t$$
+   $$\mathbf{A}_t^{(n)} = \mathbf{A}_{t-1}^{(n)} - \eta \mathbf{V}_t^{(n)}$$
+
+3. **Anderson加速**：
+   利用历史迭代信息构造更好的更新方向，特别适合ALS这类定点迭代。
+
+**大规模实现优化**：
+
+1. **分块更新**：
+   将因子矩阵 $\mathbf{A}^{(n)}$ 按行分块，每次只更新一个块：
+   - 减少内存需求
+   - 提高缓存利用率
+   - 支持在线学习
+
+2. **采样ALS**：
+   每次迭代只使用部分非零元素：
+   - 均匀采样：简单但可能有偏
+   - 重要性采样：基于leverage score
+   - 分层采样：保证每个用户/物品被采样
+
+3. **异步ALS**：
+   不等待所有模式更新完成：
+   - Hogwild!风格的无锁更新
+   - 延迟补偿机制
+   - 理论保证：在温和条件下收敛
+
 ### 16.2.3 Tucker分解
 
 Tucker分解是CP分解的推广：
@@ -122,6 +256,93 @@ $$\mathcal{X} \approx \mathcal{G} \times_1 \mathbf{U}^{(1)} \times_2 \mathbf{U}^
 - 使用 tensor-matrix chain multiplication
 - 实现 memory-efficient HOOI (ME-HOOI)
 
+**高级优化技术**：
+
+1. **增量SVD更新**：
+   不每次都计算完整SVD，而是使用增量方法：
+   ```
+   已有：UΣV^T ≈ Y_(n)
+   新数据到达：ΔY
+   更新：[U', Σ', V'] = incremental_svd(U, Σ, V, ΔY)
+   ```
+   
+   复杂度从 $O(I_n^2 J_n)$ 降至 $O(I_n R_n^2)$，其中 $J_n = \prod_{k \neq n} I_k$。
+
+2. **随机化HOOI**：
+   使用随机投影加速SVD计算：
+   ```
+   Ω = randn(J_n, k)  # k = R_n + oversampling
+   Q = orth(Y_(n) * Ω)
+   B = Q^T * Y_(n)
+   [U_B, S, V] = svd(B)
+   U^(n) = Q * U_B(:, 1:R_n)
+   ```
+
+3. **块Tucker分解**：
+   将大张量分割成小块，分别处理：
+   $$\mathcal{X} = \sum_{b=1}^{B} \mathcal{X}_b$$
+   $$\mathcal{X}_b \approx \mathcal{G}_b \times_1 \mathbf{U}_b^{(1)} \times_2 \mathbf{U}_b^{(2)} \times_3 \mathbf{U}_b^{(3)}$$
+   
+   优势：
+   - 每个块可并行处理
+   - 内存需求大幅降低
+   - 支持流式处理
+
+4. **自适应秩选择**：
+   不需要预先指定 $(R_1, R_2, ..., R_N)$：
+   ```
+   对于每个模式 n:
+       计算奇异值衰减率
+       R_n = argmin{r: Σ_{i=1}^r s_i^2 / Σ_{i=1}^{I_n} s_i^2 > θ}
+   ```
+   
+   其中 $\theta$ 是能量保留阈值（如 0.95）。
+
+**稀疏Tucker分解**：
+
+1. **稀疏核心张量**：
+   在核心张量上施加稀疏性约束：
+   $$\min_{\mathcal{G}, \{\mathbf{U}^{(n)}\}} \|\mathcal{X} - \mathcal{G} \times \{\mathbf{U}^{(n)}\}\|_F^2 + \lambda \|\mathcal{G}\|_1$$
+   
+   使用软阈值算子：$\mathcal{G} \leftarrow \text{soft}(\mathcal{G}, \lambda)$
+
+2. **稀疏因子矩阵**：
+   促进因子矩阵的列稀疏性：
+   $$\min \|\mathcal{X} - \text{tucker}(\mathcal{G}, \{\mathbf{U}^{(n)}\})\|_F^2 + \sum_n \lambda_n \|\mathbf{U}^{(n)}\|_{2,1}$$
+   
+   其中 $\|\cdot\|_{2,1}$ 是组LASSO范数。
+
+**并行化策略**：
+
+1. **模式并行**：
+   ```
+   parallel for n = 1:N
+       计算 Y^(n) = X × {U^(k)^T}_{k≠n}
+       更新 U^(n) = svd(Y^(n)_(n), R_n)
+   end
+   ```
+   
+   注意：需要同步以保证一致性。
+
+2. **数据并行**：
+   将张量按某个模式分割：
+   ```
+   X = [X_1; X_2; ...; X_P]  # 沿mode-1分割
+   每个节点p计算：
+       Y_p^(n) = X_p × {U^(k)^T}_{k≠n}
+   全局归约：
+       Y^(n) = gather(Y_1^(n), ..., Y_P^(n))
+   ```
+
+3. **流水线并行**：
+   不同模式的更新可以流水线化：
+   ```
+   时刻1: 更新U^(1)
+   时刻2: 更新U^(2), 传输U^(1)
+   时刻3: 更新U^(3), 传输U^(2), 使用U^(1)
+   ...
+   ```
+
 ### 16.2.5 随机化加速
 
 **随机采样Tucker分解**：
@@ -133,6 +354,99 @@ $$\mathcal{X} \approx \mathcal{G} \times_1 \mathbf{U}^{(1)} \times_2 \mathbf{U}^
 $$\|\mathcal{X} - \hat{\mathcal{X}}\|_F \leq (1 + \epsilon) \|\mathcal{X} - \mathcal{X}_k\|_F$$
 
 其中 $\mathcal{X}_k$ 是最优的秩-$(R_1, \ldots, R_N)$ 近似。
+
+**详细的随机化算法**：
+
+1. **Fiber采样**：
+   ```
+   对于每个模式 n:
+       选择采样数 s_n = O(R_n log R_n / ε^2)
+       采样概率 p_i ∝ ||X(i,:,...,:)||_F^2  # leverage score
+       采样索引集 S_n
+   构建采样张量：
+       X_S = X[S_1, S_2, ..., S_N]
+   ```
+
+2. **多阶投影**：
+   使用随机投影矩阵压缩张量：
+   $$\tilde{\mathcal{X}} = \mathcal{X} \times_1 \boldsymbol{\Omega}^{(1)} \times_2 \boldsymbol{\Omega}^{(2)} \times_3 \cdots \times_N \boldsymbol{\Omega}^{(N)}$$
+   
+   其中 $\boldsymbol{\Omega}^{(n)} \in \mathbb{R}^{s_n \times I_n}$ 是随机投影矩阵（如高斯矩阵或稀疏矩阵）。
+
+3. **两阶段算法**：
+   ```
+   # 阶段1：快速近似
+   [G_approx, {U_approx^(n)}] = tucker_als(τilde{X}, {R_n}, max_iter=5)
+   
+   # 阶段2：精细化
+   [G, {U^(n)}] = tucker_als(X, {R_n}, init={U_approx^(n)}, max_iter=20)
+   ```
+
+**采样复杂度分析**：
+
+对于大小为 $I_1 \times I_2 \times \cdots \times I_N$ 的张量：
+- 完整Tucker-ALS：$O(\sum_n I_n \prod_{k \neq n} I_k)$
+- 随机采样：$O(\sum_n s_n \prod_{k \neq n} s_k)$
+- 加速比：$\prod_n (I_n/s_n)$
+
+当 $s_n = O(\sqrt{I_n})$ 时，可获得 $O(2^{N/2})$ 倍加速。
+
+**实用的采样策略**：
+
+1. **自适应采样**：
+   ```
+   初始：s_n = min(50, I_n/10)
+   while 不满足精度要求:
+       s_n *= 1.5
+       重新采样和计算
+   ```
+
+2. **分层采样**：
+   - 将每个模式分成若干层
+   - 每层独立采样
+   - 保证重要用户/物品被采样
+
+3. **混合采样**：
+   - 重要fiber：确定性选择
+   - 普通fiber：随机采样
+   - 稀疏fiber：可能跳过
+
+**随机化CP分解**：
+
+1. **随机SGD**：
+   ```
+   for each epoch:
+       随机采样一批非零元素 B
+       for (i1, i2, ..., iN, v) in B:
+           # 计算预测误差
+           pred = ∑_r ∏_n A^(n)[i_n, r]
+           err = v - pred
+           
+           # 更新因子
+           for n in 1:N:
+               grad = err * ∏_{k≠n} A^(k)[i_k, :]
+               A^(n)[i_n, :] += η * grad
+   ```
+
+2. **采样ALS**：
+   每次ALS更新只使用部分非零元素：
+   ```
+   采样率 q ∈ (0, 1]
+   for each mode n:
+       S = sample(nnz(X), q * nnz(X))
+       A^(n) = update_with_samples(X, S, {A^(k)}_{k≠n})
+   ```
+
+3. **Sketched CP**：
+   使用Count Sketch加速：
+   ```
+   # 预计算sketch
+   for n in 1:N:
+       sketch[n] = CountSketch(A^(n), hash_size)
+   
+   # 快速近似计算
+   V^(n) ≈ FFT(conv(sketch[1], ..., sketch[n-1], sketch[n+1], ..., sketch[N]))
+   ```
 
 ## 16.3 稀疏张量的高效存储与计算
 
@@ -177,6 +491,149 @@ for each nonzero (i1, ..., iN, v) in X:
    - 原子操作处理写冲突
    - 使用私有累加器+归约
 
+**高级优化实现**：
+
+1. **块化MTTKRP**：
+   ```c
+   // 将非零元素按mode-n索引分块
+   #define BLOCK_SIZE 64
+   
+   for (block = 0; block < num_blocks; block++) {
+       // 预加载该块需要的因子矩阵行
+       prefetch_factor_rows(block);
+       
+       #pragma omp parallel for
+       for (idx = block_start[block]; idx < block_end[block]; idx++) {
+           i_n = coords[idx].mode_n;
+           val = values[idx];
+           
+           // SIMD化的内层循环
+           #pragma omp simd
+           for (r = 0; r < R; r++) {
+               prod = val;
+               for (k = 0; k < N; k++) {
+                   if (k != n) {
+                       prod *= A[k][coords[idx].indices[k]][r];
+                   }
+               }
+               Y_private[tid][i_n][r] += prod;
+           }
+       }
+   }
+   
+   // 归约私有结果
+   reduce_private_results(Y_private, Y);
+   ```
+
+2. **缓存感知的重排序**：
+   ```
+   // Z-order (Morton order) 重排序
+   struct NonZero {
+       uint64_t morton_code;
+       int indices[N];
+       float value;
+   };
+   
+   // 计算Morton码
+   for (each nonzero) {
+       nz.morton_code = interleave_bits(indices);
+   }
+   
+   // 按Morton码排序
+   sort(nonzeros, by_morton_code);
+   ```
+
+3. **融合计算**：
+   将多个MTTKRP操作融合：
+   ```
+   // 传统：分别计算每个模式
+   Y1 = MTTKRP(X, {A2, A3}, mode=1)
+   Y2 = MTTKRP(X, {A1, A3}, mode=2)
+   Y3 = MTTKRP(X, {A1, A2}, mode=3)
+   
+   // 融合：一次遍历
+   for (each nonzero (i,j,k,v)) {
+       for (r = 0; r < R; r++) {
+           Y1[i,r] += v * A2[j,r] * A3[k,r];
+           Y2[j,r] += v * A1[i,r] * A3[k,r];
+           Y3[k,r] += v * A1[i,r] * A2[j,r];
+       }
+   }
+   ```
+
+4. **GPU优化**：
+   ```cuda
+   __global__ void sparse_mttkrp_kernel(
+       int nnz, int* coords, float* vals,
+       float** factors, float* output, 
+       int mode, int rank
+   ) {
+       int tid = blockIdx.x * blockDim.x + threadIdx.x;
+       if (tid >= nnz) return;
+       
+       // 共享内存缓存因子矩阵行
+       __shared__ float cache[CACHE_SIZE];
+       
+       int out_idx = coords[tid * N + mode];
+       float val = vals[tid];
+       
+       // Warp级并行
+       for (int r = threadIdx.y; r < rank; r += blockDim.y) {
+           float prod = val;
+           #pragma unroll
+           for (int n = 0; n < N; n++) {
+               if (n != mode) {
+                   int idx = coords[tid * N + n];
+                   prod *= factors[n][idx * rank + r];
+               }
+           }
+           atomicAdd(&output[out_idx * rank + r], prod);
+       }
+   }
+   ```
+
+5. **数据布局优化**：
+   ```
+   // AoS (Array of Structures) vs SoA (Structure of Arrays)
+   
+   // AoS (差的局部性)
+   struct Element {
+       int i, j, k;
+       float value;
+   } elements[nnz];
+   
+   // SoA (更好的向量化)
+   int* indices_i;
+   int* indices_j; 
+   int* indices_k;
+   float* values;
+   
+   // 进一步：分块SoA
+   struct Block {
+       int indices[3][BLOCK_SIZE];
+       float values[BLOCK_SIZE];
+   } blocks[];
+   ```
+
+**性能分析与调优**：
+
+1. **瓶颈识别**：
+   - 内存带宽：MTTKRP通常受限于内存带宽
+   - 计算强度：O(R) flops per byte
+   - 不规则访问：随机访问因子矩阵
+
+2. **Roofline模型**：
+   ```
+   算术强度 = (2*R*nnz) / (nnz*12 + N*I*R*4)
+   峰值性能 = min(峰值浮点, 算术强度 * 内存带宽)
+   ```
+
+3. **优化效果**：
+   - 基础实现：~5% 峰值性能
+   - 块化+向量化：~25% 峰值性能
+   - GPU优化：~40% 峰值性能
+   - 融合计算：2-3x 加速
+
 ### 16.3.3 分布式稀疏张量计算
 
 **张量分区策略**：
@@ -197,12 +654,153 @@ for each nonzero (i1, ..., iN, v) in X:
 - 使用 overlap 技术隐藏通信延迟
 - 压缩传输的因子矩阵
 
+**详细的分布式算法**：
+
+1. **Medium-grained分区**：
+   ```
+   // 将张量分成P×Q×R个块
+   对于节点(p,q,r)：
+       存储X[i_p:i_{p+1}, j_q:j_{q+1}, k_r:k_{r+1}]
+       本地因子：A1[i_p:i_{p+1},:], A2[j_q:j_{q+1},:], A3[k_r:k_{r+1},:]
+   
+   MTTKRP算法：
+   1. 本地部分计算
+   2. All-reduce在适当维度
+   3. Scatter结果到相应节点
+   ```
+
+2. **通信避免算法**：
+   ```
+   // 3D张量在P个节点上
+   for iteration = 1:max_iter
+       // Mode-1更新(无通信)
+       A1_local = local_mttkrp(X_local, A2_local, A3_local, mode=1)
+       
+       // Mode-2更新(需要A1)
+       A1_gathered = allgather(A1_local, row_comm)
+       A2_local = local_mttkrp(X_local, A1_gathered, A3_local, mode=2)
+       
+       // Mode-3更新(需要A1,A2)
+       A2_gathered = allgather(A2_local, col_comm)
+       A3_local = local_mttkrp(X_local, A1_gathered, A2_gathered, mode=3)
+   end
+   ```
+
+3. **异步更新策略**：
+   ```python
+   class AsyncDistributedCP:
+       def __init__(self, X_local, rank, world_size):
+           self.X_local = X_local
+           self.factors = [init_factor(dim, R) for dim in dims]
+           self.buffer = [None] * N_modes
+           self.version = [0] * N_modes
+           
+       def async_update(self, mode):
+           # 使用过期的因子进行更新
+           Y = local_mttkrp(self.X_local, self.buffer, mode)
+           self.factors[mode] = solve_least_squares(Y)
+           
+           # 非阻塞发送
+           req = comm.Isend(self.factors[mode], dest=all)
+           
+           # 尝试接收其他节点的更新
+           if comm.Iprobe():
+               new_factor, source, tag = comm.recv()
+               self.buffer[tag] = new_factor
+               self.version[tag] += 1
+   ```
+
+**负载均衡技术**：
+
+1. **动态重分配**：
+   ```
+   // 监控每个节点的计算时间
+   if load_imbalance() > threshold:
+       // 计算新的分区
+       new_partition = compute_balanced_partition(nnz_per_node)
+       
+       // 迁移数据
+       migrate_data(old_partition, new_partition)
+   ```
+
+2. **工作窃取**：
+   ```
+   while has_work() or can_steal():
+       if has_work():
+           process_local_work()
+       else:
+           victim = select_victim_node()
+           stolen_work = steal_from(victim)
+           process_stolen_work(stolen_work)
+   ```
+
+3. **分层负载均衡**：
+   - 节点间：粗粒度均衡
+   - 节点内：线程级细粒度均衡
+
+**容错与恢复**：
+
+1. **检查点机制**：
+   ```python
+   def checkpoint():
+       if iteration % checkpoint_interval == 0:
+           # 保存因子矩阵
+           save_factors_to_disk(self.factors)
+           # 保存迭代状态
+           save_state(iteration, loss)
+   
+   def recover():
+       # 从最近的检查点恢复
+       self.factors = load_factors_from_disk()
+       iteration, loss = load_state()
+       return iteration
+   ```
+
+2. **复制策略**：
+   - 关键因子矩阵多副本
+   - 使用Reed-Solomon编码
+   - 跨机架复制
+
+**通信模式优化**：
+
+1. **Butterfly混合**：
+   ```
+   // log(P)轮通信完成全局交换
+   for round = 0 to log2(P)-1:
+       partner = rank XOR (1 << round)
+       exchange_with(partner)
+       merge_factors()
+   ```
+
+2. **分层All-reduce**：
+   ```
+   // 机架内先归约
+   local_reduce(rack_comm)
+   
+   // 跨机架通信
+   if is_rack_leader:
+       global_reduce(leader_comm)
+   
+   // 机架内广播
+   broadcast(rack_comm)
+   ```
+
+3. **流水线通信**：
+   ```
+   // 将大消息分成小块
+   for chunk in chunks:
+       send_async(chunk, next_node)
+       if has_received():
+           process_chunk(recv_chunk)
+   ```
+
 ### 16.3.4 GPU加速的稀疏张量运算
 
 **挑战**：
 - 不规则的内存访问模式
 - 负载不均衡
 - 有限的GPU内存
+- 原子操作的竞争
 
 **优化策略**：
 1. **COO-based GPU kernel**：
@@ -216,6 +814,186 @@ for each nonzero (i1, ..., iN, v) in X:
 3. **多GPU并行**：
    - 模型并行：分解因子矩阵
    - 数据并行：分区张量
+
+**高效的GPU实现**：
+
+1. **分层并行策略**：
+   ```cuda
+   __global__ void hierarchical_mttkrp(
+       int nnz, int4* coords, float* vals,
+       float* A1, float* A2, float* A3, 
+       float* output, int rank, int mode
+   ) {
+       // Block级别：处理一组非零元素
+       __shared__ float s_factors[3][BLOCK_SIZE][RANK];
+       
+       // Warp级别：协作加载因子矩阵
+       int warp_id = threadIdx.x / 32;
+       int lane_id = threadIdx.x % 32;
+       
+       // 加载相关因子矩阵行到共享内存
+       cooperative_load_factors(coords, s_factors);
+       __syncthreads();
+       
+       // Thread级别：计算乘积
+       for (int elem = blockIdx.x * blockDim.x + threadIdx.x; 
+            elem < nnz; elem += gridDim.x * blockDim.x) {
+           
+           int4 coord = coords[elem];
+           float val = vals[elem];
+           int out_idx = get_index(coord, mode);
+           
+           // 小循环展开
+           #pragma unroll 4
+           for (int r = 0; r < rank; r += 4) {
+               float4 prod = make_float4(val, val, val, val);
+               
+               // 向量化计算
+               prod = compute_product_vectorized(
+                   coord, s_factors, r, mode, prod
+               );
+               
+               // 分散写回
+               scatter_atomic_add(output, out_idx, r, prod);
+           }
+       }
+   }
+   ```
+
+2. **Hash-based冲突解决**：
+   ```cuda
+   __device__ void scatter_atomic_add(
+       float* output, int row, int col_start, float4 vals
+   ) {
+       // 使用hash table减少原子操作冲突
+       const int HASH_SIZE = 1024;
+       __shared__ float hash_table[HASH_SIZE];
+       __shared__ int hash_keys[HASH_SIZE];
+       
+       int hash = (row * RANK + col_start) % HASH_SIZE;
+       
+       // 尝试写入hash table
+       int old_key = atomicCAS(&hash_keys[hash], -1, row);
+       if (old_key == -1 || old_key == row) {
+           // 成功获得槽位
+           atomicAdd(&hash_table[hash], vals.x + vals.y + vals.z + vals.w);
+       } else {
+           // 冲突，直接写全局内存
+           atomicAdd(&output[row * RANK + col_start], vals.x);
+           // ...
+       }
+   }
+   ```
+
+3. **Tensor Core优化**：
+   ```cuda
+   // 使用wmma API进行矩阵乘法
+   #include <mma.h>
+   using namespace nvcuda;
+   
+   __global__ void tensor_core_mttkrp(
+       half* A_factors, half* B_factors, 
+       float* C_output, int M, int N, int K
+   ) {
+       // 声明wmma fragments
+       wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
+       wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::col_major> b_frag;
+       wmma::fragment<wmma::accumulator, 16, 16, 16, float> c_frag;
+       
+       // 初始化累加器
+       wmma::fill_fragment(c_frag, 0.0f);
+       
+       // Tensor Core计算
+       for (int k = 0; k < K; k += 16) {
+           wmma::load_matrix_sync(a_frag, A_factors + k, 16);
+           wmma::load_matrix_sync(b_frag, B_factors + k, 16);
+           wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+       }
+       
+       // 存储结果
+       wmma::store_matrix_sync(C_output, c_frag, 16, wmma::mem_row_major);
+   }
+   ```
+
+4. **动态并行度调整**：
+   ```cuda
+   __global__ void adaptive_kernel(
+       int nnz, int* row_ptr, int* col_idx, float* vals
+   ) {
+       // 根据行的非零元素数量动态分配线程
+       int row = blockIdx.x;
+       int nnz_in_row = row_ptr[row+1] - row_ptr[row];
+       
+       if (nnz_in_row < 32) {
+           // 小行：一个warp处理多行
+           small_row_kernel(row, row_ptr, col_idx, vals);
+       } else if (nnz_in_row < 1024) {
+           // 中等行：一个block处理一行
+           medium_row_kernel(row, row_ptr, col_idx, vals);
+       } else {
+           // 大行：多个block处理一行
+           large_row_kernel(row, row_ptr, col_idx, vals);
+       }
+   }
+   ```
+
+5. **内存管理优化**：
+   ```cuda
+   class GPUMemoryPool {
+   private:
+       void* pool;
+       size_t pool_size;
+       std::vector<Block> free_blocks;
+       
+   public:
+       void* allocate(size_t size) {
+           // 从内存池分配
+           auto it = std::find_if(free_blocks.begin(), free_blocks.end(),
+               [size](const Block& b) { return b.size >= size; });
+           
+           if (it != free_blocks.end()) {
+               void* ptr = it->ptr;
+               it->ptr += size;
+               it->size -= size;
+               return ptr;
+           }
+           
+           // 回退到cudaMalloc
+           return fallback_allocate(size);
+       }
+       
+       void batch_prefetch(const std::vector<TensorBlock>& blocks) {
+           // 预取下一批数据
+           #pragma omp parallel for
+           for (int i = 0; i < blocks.size(); i++) {
+               cudaMemPrefetchAsync(blocks[i].data, blocks[i].size, 
+                                   device_id, stream[i]);
+           }
+       }
+   };
+   ```
+
+**性能分析与调优**：
+
+1. **Occupancy优化**：
+   ```
+   // 动态调整block大小
+   int block_size;
+   int min_grid_size;
+   cudaOccupancyMaxPotentialBlockSize(
+       &min_grid_size, &block_size, kernel, 0, 0
+   );
+   ```
+
+2. **内存带宽优化**：
+   - 合并内存访问
+   - 使用纹理内存缓存只读数据
+   - 避免bank conflict
+
+3. **性能指标**：
+   - COO格式：~200 GFLOPS (V100)
+   - CSF格式：~150 GFLOPS (更好的内存局部性)
+   - Tensor Core：~400 GFLOPS (限制条件下)
 
 ## 16.4 跨域推荐的耦合矩阵分解
 
