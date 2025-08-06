@@ -1,0 +1,1396 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第13章：动态低秩近似</title>
+    <link rel="stylesheet" href="./assets/style.css">
+    <link rel="stylesheet" href="./assets/highlight.css">
+    <script src="./assets/script.js" defer></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$']],
+                displayMath: [['$$', '$$']],
+                processEscapes: false,
+                packages: {'[+]': ['noerrors']}
+            },
+            options: {
+                ignoreHtmlClass: 'tex2jax_ignore',
+                processHtmlClass: 'tex2jax_process'
+            },
+            loader: {
+                load: ['[tex]/noerrors']
+            }
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <nav id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <h3>目录</h3>
+                <button id="sidebar-toggle" class="sidebar-toggle">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+            <ul class="nav-list"><li class=""><a href="./index.html">高级大规模矩阵计算教程</a></li><li class=""><a href="./chapter1.html">第1章：二阶优化的统一框架</a></li><li class=""><a href="./chapter2.html">第2章：Hessian近似的艺术</a></li><li class=""><a href="./chapter3.html">第3章：结构化二阶方法</a></li><li class=""><a href="./chapter4.html">第4章：增量Hessian计算</a></li><li class=""><a href="./chapter5.html">第5章：Schur补的妙用</a></li><li class=""><a href="./chapter6.html">第6章：矩阵Sketching技术</a></li><li class=""><a href="./chapter7.html">第7章：随机化数值线性代数</a></li><li class=""><a href="./chapter8.html">第8章：分布式矩阵运算</a></li><li class=""><a href="./chapter9.html">第9章：异步优化的数学基础</a></li><li class=""><a href="./chapter10.html">第10章：Riemannian优化基础</a></li><li class=""><a href="./chapter11.html">第11章：流形预条件技术</a></li><li class=""><a href="./chapter12.html">第12章：结构化矩阵的快速算法</a></li><li class="active"><a href="./chapter13.html">第13章：动态低秩近似</a></li><li class=""><a href="./chapter14.html">第14章：大规模协同过滤的矩阵技术</a></li><li class=""><a href="./chapter15.html">第15章：实时推荐的增量矩阵方法</a></li><li class=""><a href="./chapter16.html">第16章：多模态推荐的张量分解</a></li><li class=""><a href="./chapter17.html">第17章：隐式微分与双层优化</a></li><li class=""><a href="./chapter18.html">第18章：量子启发的矩阵算法</a></li><li class=""><a href="./chapter19.html">附录A：数值稳定性速查表</a></li><li class=""><a href="./chapter20.html">附录B：性能调优检查清单</a></li><li class=""><a href="./chapter21.html">附录C：常用矩阵恒等式</a></li><li class=""><a href="./CLAUDE.html">高级大规模矩阵计算教程项目说明</a></li><li class=""><a href="./README.html">高级大规模矩阵计算教程</a></li></ul>
+        </nav>
+        
+        <main class="content">
+            <article>
+                <h1 id="13">第13章：动态低秩近似</h1>
+<p>在大规模数据流和在线学习场景中，我们经常需要维护矩阵的低秩近似，同时适应数据的动态变化。本章深入探讨流式环境下的矩阵分解更新、自适应秩选择、在线补全算法，以及这些技术与现代深度学习中模型压缩的深刻联系。我们将特别关注时间-空间-精度的三方权衡，以及在非平稳环境中的理论保证。</p>
+<h2 id="_1">学习目标</h2>
+<ul>
+<li>掌握增量SVD的核心算法及其数值稳定性分析</li>
+<li>理解在线环境下的秩选择理论与实践</li>
+<li>学会设计适应性遗忘机制处理概念漂移</li>
+<li>建立动态低秩近似与神经网络压缩的联系</li>
+<li>掌握流式矩阵计算的regret分析框架</li>
+</ul>
+<h2 id="131">13.1 流式矩阵近似基础</h2>
+<h3 id="1311">13.1.1 问题设定与挑战</h3>
+<p>考虑数据流设定：时刻$t$观察到向量$\mathbf{x}_t \in \mathbb{R}^n$或矩阵更新$\Delta\mathbf{A}_t$。目标是维护当前数据矩阵$\mathbf{A}_t$的秩$k$近似$\tilde{\mathbf{A}}_t$：</p>
+<p>$$\mathbf{A}_t = \sum_{i=1}^t \mathbf{x}_i\mathbf{x}_i^T \quad \text{或} \quad \mathbf{A}_t = \mathbf{A}_0 + \sum_{i=1}^t \Delta\mathbf{A}_i$$
+核心挑战：</p>
+<ol>
+<li><strong>空间限制</strong>：只能存储$O(nk)$而非$O(n^2)$的数据</li>
+<li><strong>单遍处理</strong>：每个数据点只能访问一次</li>
+<li><strong>实时更新</strong>：更新复杂度需远低于批处理SVD的$O(n^3)$</li>
+<li><strong>精度保证</strong>：与最优秩$k$近似的误差有界</li>
+</ol>
+<p><strong>数学形式化</strong>：定义流式低秩近似问题为
+$$\min_{\tilde{\mathbf{A}}_t: \text{rank}(\tilde{\mathbf{A}}_t) \leq k} |\mathbf{A}_t - \tilde{\mathbf{A}}_t|_F^2$$
+在约束条件下：</p>
+<ul>
+<li>空间复杂度：$O(nk + \text{poly}(k))$</li>
+<li>更新时间：$O(nk^2)$每个数据点</li>
+<li>仅使用过去观测${\mathbf{x}_1, \ldots, \mathbf{x}_t}$</li>
+</ul>
+<p><strong>实际应用场景</strong>：</p>
+<ul>
+<li><strong>推荐系统</strong>：用户-物品交互矩阵的实时更新</li>
+<li><strong>网络监控</strong>：流量矩阵的异常检测</li>
+<li><strong>金融数据</strong>：协方差矩阵的在线估计</li>
+<li><strong>计算机视觉</strong>：视频流的背景建模</li>
+</ul>
+<h3 id="1312">13.1.2 性能度量与理论界限</h3>
+<p>定义累积regret：
+$$R_T = \sum_{t=1}^T |\mathbf{A}_t - \tilde{\mathbf{A}}_t|_F^2 - \sum_{t=1}^T |\mathbf{A}_t - \mathbf{A}_t^{(k)}|_F^2$$
+其中$\mathbf{A}_t^{(k)}$是$\mathbf{A}_t$的最优秩$k$近似。</p>
+<p><strong>定理13.1</strong>（流式SVD的regret界）：存在算法使得
+$$R_T \leq O(k\log T \cdot \sum_{j=k+1}^n \lambda_j(\mathbf{A}_T))$$
+这表明额外误差仅对数增长于时间$T$。</p>
+<p><strong>证明要点</strong>：</p>
+<ol>
+<li>利用矩阵扰动理论分析单步误差</li>
+<li>通过telescoping sum技术累积误差界</li>
+<li>应用在线学习的regret分析框架</li>
+</ol>
+<p><strong>详细证明思路</strong>：
+设$\mathbf{E}_t = \tilde{\mathbf{A}}_t - \mathbf{A}_t^{(k)}$为时刻$t$的额外误差。关键观察是：
+$$|\mathbf{E}_t|_F^2 \leq |\mathbf{E}_{t-1}|_F^2 + 2\langle\mathbf{E}_{t-1}, \Delta_t\rangle + |\Delta_t|_F^2$$
+其中$\Delta_t$是时刻$t$的更新。通过精心选择更新策略，可以控制交叉项$\langle\mathbf{E}_{t-1}, \Delta_t\rangle$。</p>
+<p><strong>更细致的性能度量</strong>：</p>
+<p><strong>相对误差</strong>：
+$$\text{RelErr}_t = \frac{|\mathbf{A}_t - \tilde{\mathbf{A}}_t|_F}{|\mathbf{A}_t|_F}$$
+<strong>子空间距离</strong>（更敏感的度量）：
+$$d_{\text{sub}}(\mathbf{U}_t, \tilde{\mathbf{U}}_t) = |\mathbf{U}_t\mathbf{U}_t^T - \tilde{\mathbf{U}}_t\tilde{\mathbf{U}}_t^T|_F$$
+<strong>投影误差</strong>（应用导向）：
+$$\text{ProjErr}_t = \mathbb{E}_{\mathbf{x}}[|\mathbf{x} - \tilde{\mathbf{U}}_t\tilde{\mathbf{U}}_t^T\mathbf{x}|^2]$$
+<strong>Grassmannian距离</strong>（几何视角）：
+$$d_{\text{Grass}}(\mathbf{U}_t, \tilde{\mathbf{U}}_t) = \left(\sum_{i=1}^k \theta_i^2\right)^{1/2}$$
+其中$\theta_i$是两个子空间之间的主角。</p>
+<p><strong>定理13.2</strong>（子空间追踪）：在温和条件下，
+$$d_{\text{sub}}(\mathbf{U}_t, \tilde{\mathbf{U}}_t) \leq \frac{C}{\lambda_k(\mathbf{A}_t) - \lambda_{k+1}(\mathbf{A}_t)} \cdot \text{err}_t$$
+其中分母是特征值间隙，决定了子空间分离的难度。</p>
+<p><strong>实际含义</strong>：</p>
+<ul>
+<li>特征值间隙大 → 子空间稳定，易追踪</li>
+<li>特征值间隙小 → 子空间混淆，难分离</li>
+<li>退化情况（$\lambda_k = \lambda_{k+1}$）需特殊处理</li>
+</ul>
+<p><strong>高阶误差分析</strong>：</p>
+<p>对于有限精度计算，总误差由三部分组成：</p>
+<ol>
+<li><strong>近似误差</strong>：$\epsilon_{\text{approx}} = |\mathbf{A}_t - \mathbf{A}_t^{(k)}|_F$</li>
+<li><strong>算法误差</strong>：$\epsilon_{\text{algo}} = |\mathbf{A}_t^{(k)} - \tilde{\mathbf{A}}_t^{\text{exact}}|_F$</li>
+<li><strong>舍入误差</strong>：$\epsilon_{\text{round}} = |\tilde{\mathbf{A}}_t^{\text{exact}} - \tilde{\mathbf{A}}_t^{\text{float}}|_F$</li>
+</ol>
+<p><strong>定理13.3</strong>（总误差界）：在IEEE双精度下，
+$$|\mathbf{A}_t - \tilde{\mathbf{A}}_t|_F \leq \epsilon_{\text{approx}} + O(\sqrt{k\log t})\sigma_{k+1} + O(t \cdot \epsilon_{\text{machine}})|\mathbf{A}_t|_F$$
+这给出了精度、秩选择和运行时间的三方权衡。</p>
+<p><strong>实用性能基准</strong>：</p>
+<p>| 度量 | 优秀 | 良好 | 需改进 |</p>
+<table>
+<thead>
+<tr>
+<th>度量</th>
+<th>优秀</th>
+<th>良好</th>
+<th>需改进</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>相对误差</td>
+<td>&lt; 1%</td>
+<td>1-5%</td>
+<td>&gt; 5%</td>
+</tr>
+<tr>
+<td>子空间距离</td>
+<td>&lt; 0.1</td>
+<td>0.1-0.3</td>
+<td>&gt; 0.3</td>
+</tr>
+<tr>
+<td>每样本时间</td>
+<td>&lt; 10μs</td>
+<td>10-100μs</td>
+<td>&gt; 100μs</td>
+</tr>
+<tr>
+<td>内存开销</td>
+<td>&lt; 2nk</td>
+<td>2-5nk</td>
+<td>&gt; 5nk</td>
+</tr>
+</tbody>
+</table>
+<h3 id="1313">13.1.3 基础增量框架</h3>
+<p><strong>算法13.1</strong>：通用增量低秩近似框架</p>
+<div class="codehilite"><pre><span></span><code>输入：初始分解<span class="w"> </span><span class="nv">U</span>₀Σ₀<span class="nv">V</span>₀ᵀ，流数据<span class="w"> </span>{<span class="nv">x</span>ₜ}
+维护：当前近似<span class="w"> </span><span class="nv">U</span>ₜΣₜ<span class="nv">V</span>ₜᵀ，秩为<span class="nv">k</span>
+<span class="k">For</span><span class="w"> </span><span class="nv">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span>,<span class="w"> </span><span class="mi">2</span>,<span class="w"> </span>...
+<span class="w">  </span><span class="mi">1</span>.<span class="w"> </span>接收新数据<span class="nv">x</span>ₜ（或Δ<span class="nv">A</span>ₜ）
+<span class="w">  </span><span class="mi">2</span>.<span class="w"> </span>计算残差：<span class="nv">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">x</span>ₜ<span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">U</span>ₜ<span class="nv">U</span>ₜᵀ<span class="nv">x</span>ₜ
+<span class="w">  </span><span class="mi">3</span>.<span class="w"> </span>更新子空间：
+<span class="w">     </span><span class="o">-</span><span class="w"> </span>若‖<span class="nv">r</span>‖<span class="w"> </span><span class="o">&gt;</span><span class="w"> </span>θ：扩展<span class="nv">U</span>空间
+<span class="w">     </span><span class="o">-</span><span class="w"> </span>否则：仅更新系数
+<span class="w">  </span><span class="mi">4</span>.<span class="w"> </span>可选：秩截断保持<span class="nv">k</span>
+<span class="w">  </span><span class="mi">5</span>.<span class="w"> </span>可选：应用遗忘因子
+</code></pre></div>
+
+<p>关键设计选择：</p>
+<ul>
+<li><strong>扩展策略</strong>：何时增加秩vs.投影到现有空间</li>
+<li><strong>截断策略</strong>：如何选择保留的奇异值/向量</li>
+<li><strong>数值稳定化</strong>：周期性正交化的时机</li>
+</ul>
+<p><strong>详细的扩展策略分析</strong>：</p>
+<p><strong>策略1：固定阈值</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="k">if</span><span class="w"> </span>‖<span class="nv">r</span>‖<span class="w"> </span><span class="o">&gt;</span><span class="w"> </span>θ:
+<span class="w">    </span>扩展子空间
+<span class="k">else</span>:
+<span class="w">    </span>仅更新系数
+</code></pre></div>
+
+<p>优点：简单直观
+缺点：阈值选择困难，对数据尺度敏感</p>
+<p><strong>策略2：相对阈值</strong></p>
+<div class="codehilite"><pre><span></span><code>if ‖r‖/‖xₜ‖ &gt; θ_rel:
+    扩展子空间
+</code></pre></div>
+
+<p>优点：尺度不变性
+适用：数据范数变化大的场景</p>
+<p><strong>策略3：累积误差</strong></p>
+<div class="codehilite"><pre><span></span><code>维护累积残差能量E_res
+if E_res &gt; θ_energy:
+    扩展并重置E_res
+</code></pre></div>
+
+<p>优点：考虑历史信息
+适用：缓慢变化的数据流</p>
+<p><strong>截断策略比较</strong>：</p>
+<ol>
+<li>
+<p><strong>硬阈值截断</strong>：保留前$k$个奇异值
+   - 优点：秩严格受控
+   - 缺点：可能丢失重要信息</p>
+</li>
+<li>
+<p><strong>软阈值截断</strong>：$\sigma_i \leftarrow \max(\sigma_i - \tau, 0)$
+   - 优点：平滑过渡
+   - 应用：去噪场景</p>
+</li>
+<li>
+<p><strong>能量保留截断</strong>：保留95%能量的最小秩
+   - 优点：自适应数据复杂度
+   - 缺点：秩可能波动</p>
+</li>
+</ol>
+<h3 id="1314">13.1.4 与在线凸优化的联系</h3>
+<p>将低秩近似视为约束优化：
+$$\min_{\mathbf{U}\in\mathbb{R}^{n\times k}} \sum_{t=1}^T \ell_t(\mathbf{U}) = \sum_{t=1}^T |\mathbf{x}_t - \mathbf{U}\mathbf{U}^T\mathbf{x}_t|^2$$
+这建立了与在线梯度下降、镜像下降等经典算法的联系。特别地，Oja's rule可视为此问题的随机梯度解法。</p>
+<p><strong>Oja's算法详解</strong>：
+更新规则：
+$$\mathbf{U}_{t+1} = \mathbf{U}_t + \eta_t(\mathbf{x}_t\mathbf{x}_t^T - \mathbf{U}_t\mathbf{U}_t^T\mathbf{x}_t\mathbf{x}_t^T)\mathbf{U}_t$$
+<strong>收敛性质</strong>：</p>
+<ul>
+<li>步长$\eta_t = c/t$时，$\mathbb{E}[|\mathbf{U}_t\mathbf{U}_t^T - \mathbf{U}_*\mathbf{U}_*^T|_F^2] = O(1/t)$</li>
+<li>需要特征值间隙条件：$\lambda_k &gt; \lambda_{k+1}$</li>
+</ul>
+<p><strong>Oja算法的几何解释</strong>：
+Oja更新可分解为两步：</p>
+<ol>
+<li><strong>Hebbian项</strong>：$\mathbf{x}_t\mathbf{x}_t^T\mathbf{U}_t$增强$\mathbf{x}_t$方向</li>
+<li><strong>正交化项</strong>：$-\mathbf{U}_t\mathbf{U}_t^T\mathbf{x}_t\mathbf{x}_t^T\mathbf{U}_t$保持列正交</li>
+</ol>
+<p>这种"增强-正交化"模式在神经科学中有对应：Hebbian学习与侧向抑制。</p>
+<p><strong>推广：在线矩阵流形优化</strong></p>
+<p>考虑Stiefel流形约束：$\mathbf{U}^T\mathbf{U} = \mathbf{I}_k$</p>
+<p><strong>Riemannian SGD</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="mf">1.</span><span class="w"> </span><span class="n">计算欧氏梯度</span><span class="err">：∇</span><span class="n">f</span><span class="p">(</span><span class="n">Uₜ</span><span class="p">)</span>
+<span class="mf">2.</span><span class="w"> </span><span class="n">投影到切空间</span><span class="err">：</span><span class="n">grad</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">∇</span><span class="n">f</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">Uₜ</span><span class="p">(</span><span class="n">Uₜᵀ</span><span class="err">∇</span><span class="n">f</span><span class="p">)</span>
+<span class="mf">3.</span><span class="w"> </span><span class="n">沿测地线更新</span><span class="err">：</span><span class="n">Uₜ</span><span class="err">₊</span><span class="n">₁</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Retr</span><span class="p">(</span><span class="n">Uₜ</span><span class="p">,</span><span class="w"> </span><span class="o">-</span><span class="n">ηₜ</span><span class="err">·</span><span class="n">grad</span><span class="p">)</span>
+</code></pre></div>
+
+<p>其中Retraction可选：</p>
+<ul>
+<li>QR分解：$\text{Retr}(\mathbf{U}, \boldsymbol{\xi}) = \text{qr}(\mathbf{U} + \boldsymbol{\xi})$</li>
+<li>Cayley变换：计算更精确但更昂贵</li>
+<li>指数映射：$\text{exp}_{\mathbf{U}}(\boldsymbol{\xi}) = [\mathbf{U}, \mathbf{Q}]\exp\left(\begin{bmatrix}\mathbf{U}^T\boldsymbol{\xi} \ -\boldsymbol{\xi}^T\mathbf{U}\end{bmatrix}\right)\begin{bmatrix}\mathbf{I}_k \ \mathbf{0}\end{bmatrix}$</li>
+</ul>
+<p><strong>在线镜像下降视角</strong>：</p>
+<p>定义Bregman散度：
+$$D_\phi(\mathbf{U}, \mathbf{V}) = \phi(\mathbf{U}) - \phi(\mathbf{V}) - \langle\nabla\phi(\mathbf{V}), \mathbf{U} - \mathbf{V}\rangle$$
+选择合适的$\phi$可得到不同算法：</p>
+<ul>
+<li>$\phi(\mathbf{U}) = \frac{1}{2}|\mathbf{U}|_F^2$：标准梯度下降</li>
+<li>$\phi(\mathbf{U}) = -\log\det(\mathbf{U}^T\mathbf{U})$：自然梯度</li>
+<li>$\phi(\mathbf{U}) = \text{tr}(\mathbf{U}^T\mathbf{U}\log(\mathbf{U}^T\mathbf{U}))$：矩阵熵</li>
+</ul>
+<p><strong>加速方法</strong>：</p>
+<p><strong>动量加速Oja</strong>：
+$$\begin{aligned}
+\mathbf{V}_{t+1} &amp;= \beta\mathbf{V}_t + (1-\beta)\nabla_{\mathbf{U}}\ell_t(\mathbf{U}_t) \
+\mathbf{U}_{t+1} &amp;= \mathbf{U}_t - \eta_t\mathbf{V}_{t+1}
+\end{aligned}$$
+<strong>Nesterov加速变体</strong>：
+$$\begin{aligned}
+\mathbf{Y}_t &amp;= \mathbf{U}_t + \frac{t-1}{t+2}(\mathbf{U}_t - \mathbf{U}_{t-1}) \
+\mathbf{U}_{t+1} &amp;= \mathbf{Y}_t - \eta_t\nabla\ell_t(\mathbf{Y}_t)
+\end{aligned}$$
+<strong>与经典在线算法的对比</strong>：</p>
+<p>| 算法 | 更新复杂度 | 收敛率 | 约束处理 | 内存需求 |</p>
+<table>
+<thead>
+<tr>
+<th>算法</th>
+<th>更新复杂度</th>
+<th>收敛率</th>
+<th>约束处理</th>
+<th>内存需求</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Oja's rule</td>
+<td>$O(nk)$</td>
+<td>$O(1/t)$</td>
+<td>渐近满足</td>
+<td>$O(nk)$</td>
+</tr>
+<tr>
+<td>在线梯度下降</td>
+<td>$O(nk)$</td>
+<td>$O(\sqrt{T})$</td>
+<td>投影步</td>
+<td>$O(nk)$</td>
+</tr>
+<tr>
+<td>Riemannian SGD</td>
+<td>$O(nk^2)$</td>
+<td>$O(1/t)$</td>
+<td>精确满足</td>
+<td>$O(nk)$</td>
+</tr>
+<tr>
+<td>Block power</td>
+<td>$O(nkb)$</td>
+<td>$O(1/t^2)$</td>
+<td>渐近满足</td>
+<td>$O(nkb)$</td>
+</tr>
+<tr>
+<td>SVRG-style</td>
+<td>$O(nk)$</td>
+<td>$O(1/t^2)$</td>
+<td>投影步</td>
+<td>$O(nk)$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>在线核PCA扩展</strong>：</p>
+<p>映射到RKHS空间$\phi: \mathbb{R}^n \rightarrow \mathcal{H}$：
+$$\min_{\mathbf{U}} \sum_{t=1}^T |\phi(\mathbf{x}_t) - \mathbf{U}\mathbf{U}^T\phi(\mathbf{x}_t)|_{\mathcal{H}}^2$$
+使用核技巧避免显式映射：</p>
+<ul>
+<li>维护核矩阵的低秩近似</li>
+<li>增量更新特征向量系数</li>
+<li>Nyström近似加速计算</li>
+</ul>
+<p><strong>研究方向</strong>：</p>
+<ul>
+<li>非凸在线优化的收敛性分析</li>
+<li>自适应步长的理论保证（AdaGrad/Adam变体）</li>
+<li>分布式流式PCA的通信复杂度下界</li>
+<li>带约束的在线矩阵分解（如非负、稀疏）</li>
+<li>量子算法加速的可能性</li>
+<li>对抗性扰动下的鲁棒性分析</li>
+<li>与强化学习中表示学习的联系</li>
+</ul>
+<h2 id="132-svd">13.2 增量SVD算法深度剖析</h2>
+<h3 id="1321">13.2.1 秩一更新的扰动分析</h3>
+<p>给定SVD分解$\mathbf{A} = \mathbf{U}\boldsymbol{\Sigma}\mathbf{V}^T$，考虑秩一更新$\mathbf{A}' = \mathbf{A} + \mathbf{c}\mathbf{d}^T$。</p>
+<p><strong>引理13.1</strong>（Bunch-Nielsen）：更新后的SVD可通过以下步骤计算：</p>
+<ol>
+<li>投影：$\mathbf{p} = \mathbf{U}^T\mathbf{c}$，$\mathbf{q} = \mathbf{V}^T\mathbf{d}$</li>
+<li>正交补：$\mathbf{r}_c = \mathbf{c} - \mathbf{U}\mathbf{p}$，$\mathbf{r}_d = \mathbf{d} - \mathbf{V}\mathbf{q}$</li>
+<li>
+<p>构造中间矩阵：
+$$\mathbf{K} = \begin{bmatrix} \boldsymbol{\Sigma} + \mathbf{p}\mathbf{q}^T &amp; |\mathbf{r}_d|\mathbf{p} \ |\mathbf{r}_c|\mathbf{q}^T &amp; \mathbf{r}_c^T\mathbf{r}_d \end{bmatrix}$$</p>
+</li>
+<li>
+<p>对$\mathbf{K}$进行SVD得到更新</p>
+</li>
+</ol>
+<p>计算复杂度：$O(nk + k^3)$，远优于重新计算的$O(n^2k)$。</p>
+<p><strong>详细推导</strong>：</p>
+<p>将$\mathbf{A}' = \mathbf{A} + \mathbf{c}\mathbf{d}^T$重写为：
+$$\mathbf{A}' = [\mathbf{U}, \mathbf{c}] \begin{bmatrix} \boldsymbol{\Sigma} &amp; \mathbf{0} \ \mathbf{0}^T &amp; 1 \end{bmatrix} [\mathbf{V}, \mathbf{d}]^T$$
+但$[\mathbf{U}, \mathbf{c}]$和$[\mathbf{V}, \mathbf{d}]$可能不正交。通过正交化：
+$$[\mathbf{U}, \mathbf{c}] = [\mathbf{U}, \tilde{\mathbf{u}}]\begin{bmatrix} \mathbf{I} &amp; \mathbf{p} \ \mathbf{0}^T &amp; \rho_c \end{bmatrix}$$
+其中$\tilde{\mathbf{u}} = \mathbf{r}_c/|\mathbf{r}_c|$，$\rho_c = |\mathbf{r}_c|$。</p>
+<p><strong>稳定性分析</strong>：</p>
+<p><strong>定理13.3</strong>：设$\kappa = |\mathbf{c}||\mathbf{d}|/\sigma_{\min}(\mathbf{A})$，则相对误差满足：
+$$\frac{|\tilde{\mathbf{A}}' - \mathbf{A}'|_F}{|\mathbf{A}'|_F} \leq \epsilon_{\text{machine}} \cdot O(\kappa^2)$$
+这表明当更新幅度相对于最小奇异值过大时，算法可能不稳定。</p>
+<p><strong>特殊情况处理</strong>：</p>
+<ol>
+<li>
+<p><strong>当$\mathbf{r}_c \approx 0$或$\mathbf{r}_d \approx 0$</strong>：
+   - 更新在现有子空间内
+   - 仅更新$\boldsymbol{\Sigma}$，不改变$\mathbf{U}, \mathbf{V}$
+   - 避免不必要的秩增加</p>
+</li>
+<li>
+<p><strong>当$\mathbf{A}$不是满秩时</strong>：
+   - 需要特殊处理零奇异值
+   - 使用伪逆或正则化技术</p>
+</li>
+</ol>
+<h3 id="1322-brand">13.2.2 Brand算法及其稳定化</h3>
+<p><strong>算法13.2</strong>：Brand's增量SVD</p>
+<div class="codehilite"><pre><span></span><code>输入：当前SVD UΣVᵀ (秩k)，新列c
+1. 计算投影系数：m = Uᵀc
+2. 计算正交分量：p = c - Um, ρ = ‖p‖
+3. 若ρ &gt; ε：
+   构造扩展矩阵并SVD分解
+4. 否则：
+   仅更新Σ中的系数
+5. 定期重正交化U, V
+</code></pre></div>
+
+<p><strong>数值稳定性改进</strong>：</p>
+<ul>
+<li>Gram-Schmidt vs. Householder正交化</li>
+<li>迭代refinement技术</li>
+<li>基于条件数的自适应重计算</li>
+</ul>
+<p><strong>稳定性分析的深入考察</strong>：</p>
+<p><strong>浮点误差传播模型</strong>：
+设$\epsilon_m$为机器精度，第$t$步后的误差界：
+$$E_t \leq E_0 \cdot \kappa^t + \epsilon_m \cdot \frac{\kappa^t - 1}{\kappa - 1}$$
+其中$\kappa = \sigma_1/\sigma_k$是条件数。这表明：</p>
+<ul>
+<li>条件数越大，误差增长越快</li>
+<li>需要在$t \approx 1/\epsilon_m$步前重计算</li>
+</ul>
+<p><strong>自适应重正交化策略</strong>：</p>
+<div class="codehilite"><pre><span></span><code>定义正交性损失：δ = ‖UᵀU - I‖_F
+触发条件：
+1. δ &gt; τ_orth (典型值：10⁻⁸)
+2. 更新次数达到N_max = ⌊1/(10·ε_machine)⌋
+3. 条件数激增：κ(t)/κ(0) &gt; 100
+</code></pre></div>
+
+<p><strong>混合精度技术</strong>：</p>
+<ul>
+<li>关键运算（如内积）使用高精度</li>
+<li>存储使用低精度节省内存</li>
+<li>误差补偿算法（Kahan求和）</li>
+</ul>
+<p><strong>完整的Brand算法实现细节</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">updateSVD</span><span class="p">(</span>U, Σ, V, c<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>步骤1<span class="p">:</span><span class="w"> </span>投影到当前子空间
+<span class="w">    </span><span class="n">m</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">Uᵀc</span>
+<span class="w">    </span><span class="n">p</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">Um</span>
+<span class="w">    </span>ρ<span class="w"> </span><span class="p">=</span><span class="w"> </span>‖<span class="n">p</span>‖
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>步骤2<span class="p">:</span><span class="w"> </span>判断是否需要扩展秩
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>ρ<span class="w"> </span><span class="o">&gt;</span><span class="w"> </span>ε<span class="n">_threshold</span><span class="p">:</span>
+<span class="w">        </span><span class="o">//</span><span class="w"> </span>步骤3<span class="n">a</span><span class="p">:</span><span class="w"> </span>构造扩展矩阵
+<span class="w">        </span><span class="n">P</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">p</span><span class="o">/</span>ρ<span class="w">  </span><span class="o">//</span><span class="w"> </span>归一化
+<span class="w">        </span><span class="n">Q</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">zeros</span><span class="p">(</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span>
+<span class="w">        </span><span class="n">Q</span><span class="p">[</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span>
+
+<span class="w">        </span><span class="o">//</span><span class="w"> </span>构造<span class="p">(</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>×<span class="p">(</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>矩阵
+<span class="w">        </span><span class="n">K</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span>Σ<span class="w">  </span><span class="n">m</span><span class="p">]</span>
+<span class="w">            </span><span class="p">[</span><span class="mi">0</span><span class="w">  </span>ρ<span class="p">]</span>
+
+<span class="w">        </span><span class="o">//</span><span class="w"> </span>步骤4<span class="n">a</span><span class="p">:</span><span class="w"> </span>对<span class="n">K进行SVD</span>
+<span class="w">        </span><span class="p">[</span><span class="n">U</span><span class="o">&#39;</span><span class="p">,</span><span class="w"> </span>Σ<span class="o">&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">V</span><span class="o">&#39;</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">svd</span><span class="p">(</span><span class="n">K</span><span class="p">)</span>
+
+<span class="w">        </span><span class="o">//</span><span class="w"> </span>步骤5<span class="n">a</span><span class="p">:</span><span class="w"> </span>更新大矩阵
+<span class="w">        </span><span class="n">U_new</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="n">U</span><span class="w"> </span><span class="n">P</span><span class="p">]</span><span class="w"> </span><span class="p">@</span><span class="w"> </span><span class="n">U</span><span class="o">&#39;</span>
+<span class="w">        </span><span class="n">V_new</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="n">V</span><span class="w"> </span><span class="n">Q</span><span class="p">]</span><span class="w"> </span><span class="p">@</span><span class="w"> </span><span class="n">V</span><span class="o">&#39;</span>
+<span class="w">        </span>Σ<span class="n">_new</span><span class="w"> </span><span class="p">=</span><span class="w"> </span>Σ<span class="o">&#39;</span>
+<span class="w">    </span><span class="k">else</span><span class="p">:</span>
+<span class="w">        </span><span class="o">//</span><span class="w"> </span>步骤3<span class="n">b</span><span class="p">:</span><span class="w"> </span>仅更新系数
+<span class="w">        </span><span class="n">K</span><span class="w"> </span><span class="p">=</span><span class="w"> </span>Σ<span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">m</span><span class="o">*</span>1ᵀ<span class="w">  </span><span class="o">//</span><span class="w"> </span>秩一更新
+<span class="w">        </span><span class="p">[</span><span class="n">U</span><span class="o">&#39;</span><span class="p">,</span><span class="w"> </span>Σ<span class="o">&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">V</span><span class="o">&#39;</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">svd</span><span class="p">(</span><span class="n">K</span><span class="p">)</span>
+<span class="w">        </span><span class="n">U_new</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">U</span><span class="w"> </span><span class="p">@</span><span class="w"> </span><span class="n">U</span><span class="o">&#39;</span>
+<span class="w">        </span><span class="n">V_new</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">V</span><span class="w"> </span><span class="p">@</span><span class="w"> </span><span class="n">V</span><span class="o">&#39;</span>
+<span class="w">        </span>Σ<span class="n">_new</span><span class="w"> </span><span class="p">=</span><span class="w"> </span>Σ<span class="o">&#39;</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">U_new</span><span class="p">,</span><span class="w"> </span>Σ<span class="n">_new</span><span class="p">,</span><span class="w"> </span><span class="n">V_new</span>
+</code></pre></div>
+
+<p><strong>高级实现技巧</strong>：</p>
+<p><strong>1. 延迟更新策略</strong>：</p>
+<div class="codehilite"><pre><span></span><code>维护缓冲区B存储待处理更新
+if size(B) &lt; batch_size:
+    B.append(c)
+else:
+    // 批量更新
+    [Q_B, R_B] = qr(B)
+    K = [Σ     UᵀQ_B·R_B]
+        [0  Q_B&#39;ᵀQ_B·R_B]
+    执行块更新
+    清空B
+</code></pre></div>
+
+<p><strong>2. 自适应阈值选择</strong>：</p>
+<div class="codehilite"><pre><span></span><code>ε_threshold = max(
+    ε_abs,                    // 绝对阈值
+    ε_rel · ‖c‖,             // 相对阈值
+    √(ε_machine) · σ_k        // 数值阈值
+)
+</code></pre></div>
+
+<p><strong>3. 增量正交化</strong>：
+使用修正Gram-Schmidt的增量版本：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">for</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="err">:</span><span class="nl">k</span><span class="p">:</span>
+<span class="w">    </span><span class="n">α_j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_j</span><span class="s1">&#39;p</span>
+<span class="s1">    p = p - α_j·u_j</span>
+<span class="s1">    // 二次修正提高精度</span>
+<span class="s1">    β_j = u_j&#39;</span><span class="n">p</span>
+<span class="w">    </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">β_j</span><span class="err">·</span><span class="n">u_j</span>
+<span class="w">    </span><span class="n">m</span><span class="o">[</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">m</span><span class="o">[</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">β_j</span>
+</code></pre></div>
+
+<p><strong>正交化策略比较</strong>：</p>
+<ol>
+<li>
+<p><strong>修正Gram-Schmidt (MGS)</strong>
+   - 优点：在线更新，内存高效
+   - 缺点：数值稳定性较差
+   - 适用：中等精度要求</p>
+</li>
+<li>
+<p><strong>Householder变换</strong>
+   - 优点：数值稳定性最佳
+   - 缺点：计算量大，不易并行
+   - 适用：高精度要求</p>
+</li>
+<li>
+<p><strong>快速Givens旋转</strong>
+   - 优点：局部更新，适合稀疏
+   - 缺点：串行性质
+   - 适用：特定结构</p>
+</li>
+</ol>
+<p><strong>自适应重正交化</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">checkOrthogonality</span><span class="p">(</span>U<span class="p">):</span>
+<span class="w">    </span><span class="n">orth_error</span><span class="w"> </span><span class="p">=</span><span class="w"> </span>‖<span class="n">UᵀU</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">I</span>‖<span class="n">_F</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">orth_error</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span>ε<span class="n">_reorth</span><span class="p">:</span>
+<span class="w">        </span><span class="n">U</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">reorthogonalize</span><span class="p">(</span><span class="n">U</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">U</span>
+</code></pre></div>
+
+<p>重正交化时机：</p>
+<ul>
+<li>每隔$O(1/\epsilon_{\text{machine}})$次更新</li>
+<li>当正交性误差超过阈值</li>
+<li>在秩截断操作后</li>
+</ul>
+<h3 id="1323">13.2.3 高阶更新：块算法</h3>
+<p>对于批量更新$\mathbf{A}' = \mathbf{A} + \mathbf{C}\mathbf{D}^T$（$\mathbf{C}, \mathbf{D} \in \mathbb{R}^{n \times b}$）：</p>
+<p><strong>定理13.2</strong>：块更新可分解为
+$$\mathbf{A}' = \begin{bmatrix} \mathbf{U} &amp; \tilde{\mathbf{U}} \end{bmatrix} \tilde{\boldsymbol{\Sigma}} \begin{bmatrix} \mathbf{V} &amp; \tilde{\mathbf{V}} \end{bmatrix}^T$$
+其中$\tilde{\mathbf{U}}, \tilde{\mathbf{V}}$来自$\mathbf{C}, \mathbf{D}$的QR分解。</p>
+<p>这在处理mini-batch更新时特别高效。</p>
+<p><strong>块更新算法详解</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">blockUpdateSVD</span><span class="p">(</span>U, Σ, V, C, D<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>步骤1<span class="p">:</span><span class="w"> </span><span class="n">QR分解输入矩阵</span>
+<span class="w">    </span><span class="p">[</span><span class="n">Q_C</span><span class="p">,</span><span class="w"> </span><span class="n">R_C</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">qr</span><span class="p">(</span><span class="n">C</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">U</span><span class="p">(</span><span class="n">UᵀC</span><span class="p">))</span><span class="w">  </span><span class="o">//</span><span class="w"> </span>正交化<span class="n">C</span>
+<span class="w">    </span><span class="p">[</span><span class="n">Q_D</span><span class="p">,</span><span class="w"> </span><span class="n">R_D</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">qr</span><span class="p">(</span><span class="n">D</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">V</span><span class="p">(</span><span class="n">VᵀD</span><span class="p">))</span><span class="w">  </span><span class="o">//</span><span class="w"> </span>正交化<span class="n">D</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>步骤2<span class="p">:</span><span class="w"> </span>构造扩展矩阵
+<span class="w">    </span><span class="n">K</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span>Σ<span class="w">      </span><span class="n">UᵀC</span><span class="p">]</span>
+<span class="w">        </span><span class="p">[</span><span class="n">VᵀD</span><span class="w">    </span><span class="n">R_C</span><span class="w"> </span><span class="p">@</span><span class="w"> </span><span class="n">R_Dᵀ</span><span class="p">]</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>步骤3<span class="p">:</span><span class="w"> </span>对<span class="n">K进行SVD</span><span class="w"> </span><span class="p">(</span><span class="nb">size</span><span class="p">:</span><span class="w"> </span><span class="p">(</span><span class="n">k</span><span class="o">+</span><span class="n">b</span><span class="p">)</span>×<span class="p">(</span><span class="n">k</span><span class="o">+</span><span class="n">b</span><span class="p">))</span>
+<span class="w">    </span><span class="p">[</span><span class="n">U_K</span><span class="p">,</span><span class="w"> </span>Σ<span class="n">_K</span><span class="p">,</span><span class="w"> </span><span class="n">V_K</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">svd</span><span class="p">(</span><span class="n">K</span><span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>步骤4<span class="p">:</span><span class="w"> </span>更新原始矩阵
+<span class="w">    </span><span class="n">U_new</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="n">U</span><span class="p">,</span><span class="w"> </span><span class="n">Q_C</span><span class="p">]</span><span class="w"> </span><span class="p">@</span><span class="w"> </span><span class="n">U_K</span>
+<span class="w">    </span><span class="n">V_new</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="n">V</span><span class="p">,</span><span class="w"> </span><span class="n">Q_D</span><span class="p">]</span><span class="w"> </span><span class="p">@</span><span class="w"> </span><span class="n">V_K</span>
+<span class="w">    </span>Σ<span class="n">_new</span><span class="w"> </span><span class="p">=</span><span class="w"> </span>Σ<span class="n">_K</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>步骤5<span class="p">:</span><span class="w"> </span>可选秩截断
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nb">rank</span><span class="p">(</span>Σ<span class="n">_new</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">k_max</span><span class="p">:</span>
+<span class="w">        </span><span class="p">[</span><span class="n">U_new</span><span class="p">,</span><span class="w"> </span>Σ<span class="n">_new</span><span class="p">,</span><span class="w"> </span><span class="n">V_new</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">truncate</span><span class="p">(</span><span class="n">U_new</span><span class="p">,</span><span class="w"> </span>Σ<span class="n">_new</span><span class="p">,</span><span class="w"> </span><span class="n">V_new</span><span class="p">,</span><span class="w"> </span><span class="n">k_max</span><span class="p">)</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">U_new</span><span class="p">,</span><span class="w"> </span>Σ<span class="n">_new</span><span class="p">,</span><span class="w"> </span><span class="n">V_new</span>
+</code></pre></div>
+
+<p><strong>效率分析</strong>：</p>
+<p>复杂度分解：</p>
+<ul>
+<li>QR分解：$O(nb^2)$</li>
+<li>构造K矩阵：$O(kb + b^2)$</li>
+<li>K的SVD：$O((k+b)^3)$</li>
+<li>矩阵乘法：$O(n(k+b)^2)$</li>
+</ul>
+<p>总复杂度：$O(nb^2 + n(k+b)^2 + (k+b)^3)$</p>
+<p><strong>与逐个更新的对比</strong>：</p>
+<ul>
+<li>逐个更新$b$次：$O(nbk + bk^3)$</li>
+<li>块更新：$O(nb^2 + n(k+b)^2)$</li>
+<li>当$b \ll k$时，块更新显著更快</li>
+</ul>
+<p><strong>特殊块结构的优化</strong>：</p>
+<ol>
+<li>
+<p><strong>对称更新</strong>：$\mathbf{A}' = \mathbf{A} + \mathbf{C}\mathbf{C}^T$
+   - 只需一次QR分解
+   - 保持对称性</p>
+</li>
+<li>
+<p><strong>低秩更新</strong>：当$b \ll k$时
+   - 使用Sherman-Morrison-Woodbury公式
+   - 避免扩展到$(k+b) \times (k+b)$</p>
+</li>
+<li>
+<p><strong>稀疏更新</strong>：当$\mathbf{C}, \mathbf{D}$稀疏时
+   - 利用稀疏性减少计算
+   - 特殊的索引结构</p>
+</li>
+</ol>
+<h3 id="1324-svd">13.2.4 分布式增量SVD</h3>
+<p>在分布式设置下，不同节点观察数据流的不同部分：</p>
+<p><strong>算法13.3</strong>：异步分布式SVD更新</p>
+<div class="codehilite"><pre><span></span><code>节点i维护局部近似Uᵢ
+1. 局部更新：处理本地数据流
+2. 周期通信：交换子空间信息
+3. 共识步骤：对齐不同节点的子空间
+4. 全局更新：合并得到全局U
+</code></pre></div>
+
+<p>关键挑战：</p>
+<ul>
+<li>子空间对齐的高效算法</li>
+<li>通信与精度的权衡</li>
+<li>拜占庭节点的鲁棒性</li>
+</ul>
+<p><strong>理论分析</strong>：</p>
+<p><strong>定理13.4</strong>（分布式收敛性）：设$m$个节点，通信周期$\tau$，则：
+$$\mathbb{E}[|\mathbf{U}_T - \mathbf{U}_*|_F] \leq O\left(\frac{\sqrt{m\tau}}{T} + \frac{1}{\sqrt{mT}}\right)$$
+第一项来自通信延迟，第二项来自分布式平均。</p>
+<p><strong>通信复杂度下界</strong>：
+<strong>定理13.5</strong>：任何$\epsilon$-近似分布式PCA算法需要至少$\Omega(mk\log(1/\epsilon))$比特通信。</p>
+<p>证明基于信息论：每个节点需传递足够信息以重构全局主成分。</p>
+<p><strong>分布式架构详解</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1">// 节点i的本地算法</span>
+<span class="k">function</span><span class="w"> </span><span class="nf">nodeUpdate</span><span class="p">(</span>local_data_stream<span class="p">):</span>
+<span class="w">    </span><span class="c1">// 本地状态</span>
+<span class="w">    </span><span class="n">U_local</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c1">// n×k_local</span>
+<span class="w">    </span>Σ<span class="n">_local</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c1">// k_local×k_local</span>
+<span class="w">    </span><span class="n">buffer</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[]</span><span class="w">   </span><span class="c1">// 数据缓冲</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="n">true</span><span class="p">:</span>
+<span class="w">        </span><span class="c1">// 阶段1: 本地处理</span>
+<span class="w">        </span><span class="n">batch</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">collect_batch</span><span class="p">(</span><span class="n">local_data_stream</span><span class="p">)</span>
+<span class="w">        </span><span class="n">U_local</span><span class="p">,</span><span class="w"> </span>Σ<span class="n">_local</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">incrementalSVD</span><span class="p">(</span><span class="n">U_local</span><span class="p">,</span><span class="w"> </span>Σ<span class="n">_local</span><span class="p">,</span><span class="w"> </span><span class="n">batch</span><span class="p">)</span>
+
+<span class="w">        </span><span class="c1">// 阶段2: 周期通信</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">time_to_communicate</span><span class="p">():</span>
+<span class="w">            </span><span class="c1">// 发送本地子空间的紧凑表示</span>
+<span class="w">            </span><span class="n">sketch</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">compute_sketch</span><span class="p">(</span><span class="n">U_local</span><span class="p">,</span><span class="w"> </span>Σ<span class="n">_local</span><span class="p">)</span>
+<span class="w">            </span><span class="n">broadcast</span><span class="p">(</span><span class="n">sketch</span><span class="p">)</span>
+
+<span class="w">            </span><span class="c1">// 接收其他节点的sketch</span>
+<span class="w">            </span><span class="n">sketches</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">receive_all</span><span class="p">()</span>
+
+<span class="w">            </span><span class="c1">// 阶段3: 子空间对齐</span>
+<span class="w">            </span><span class="n">U_global</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">align_subspaces</span><span class="p">(</span><span class="n">sketches</span><span class="p">)</span>
+
+<span class="w">            </span><span class="c1">// 阶段4: 本地投影更新</span>
+<span class="w">            </span><span class="n">U_local</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">project_to_global</span><span class="p">(</span><span class="n">U_local</span><span class="p">,</span><span class="w"> </span><span class="n">U_global</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>子空间对齐算法</strong>：</p>
+<p><strong>方法1：Grassmannian平均</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">align_subspaces</span><span class="p">(</span>U_list<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>计算<span class="n">Grassmannian重心</span>
+<span class="w">    </span><span class="n">U_mean</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">grassmannian_mean</span><span class="p">(</span><span class="n">U_list</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">U_mean</span>
+
+<span class="k">function</span><span class="w"> </span><span class="nf">grassmannian_mean</span><span class="p">(</span>U_list<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>迭代算法
+<span class="w">    </span><span class="n">U_avg</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">U_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">iter</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="mi">1</span><span class="p">:</span><span class="n">max_iters</span><span class="p">:</span>
+<span class="w">        </span><span class="o">//</span><span class="w"> </span>计算到各子空间的测地线
+<span class="w">        </span><span class="n">tangents</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[]</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="n">U</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="n">U_list</span><span class="p">:</span>
+<span class="w">            </span><span class="n">v</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">log_map</span><span class="p">(</span><span class="n">U_avg</span><span class="p">,</span><span class="w"> </span><span class="n">U</span><span class="p">)</span>
+<span class="w">            </span><span class="n">tangents</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+
+<span class="w">        </span><span class="o">//</span><span class="w"> </span>平均切向量
+<span class="w">        </span><span class="n">v_mean</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">mean</span><span class="p">(</span><span class="n">tangents</span><span class="p">)</span>
+
+<span class="w">        </span><span class="o">//</span><span class="w"> </span>沿测地线更新
+<span class="w">        </span><span class="n">U_avg</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">exp_map</span><span class="p">(</span><span class="n">U_avg</span><span class="p">,</span><span class="w"> </span><span class="n">v_mean</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">U_avg</span>
+</code></pre></div>
+
+<p><strong>方法2：分布式特征分解</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">distributed_eigen_alignment</span><span class="p">():</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>构造分布式协方差矩阵
+<span class="w">    </span><span class="n">C_global</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">sum_all_nodes</span><span class="p">(</span><span class="n">U_local</span><span class="w"> </span><span class="p">@</span><span class="w"> </span>Σ<span class="n">_local²</span><span class="w"> </span><span class="p">@</span><span class="w"> </span><span class="n">U_localᵀ</span><span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>分布式特征分解
+<span class="w">    </span><span class="p">[</span><span class="n">V</span><span class="p">,</span><span class="w"> </span>Λ<span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">distributed_eig</span><span class="p">(</span><span class="n">C_global</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="p">)</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">V</span><span class="p">[:,</span><span class="w"> </span><span class="mi">1</span><span class="p">:</span><span class="n">k</span><span class="p">]</span>
+</code></pre></div>
+
+<p><strong>通信优化技术</strong>：</p>
+<ol>
+<li>
+<p><strong>量化压缩</strong>
+   ```
+   function quantize_subspace(U, bits):
+       // 随机旋转
+       R = random_orthogonal(k)
+       U_rot = U @ R</p>
+<p>// 量化
+   U_quant = quantize(U_rot, bits)</p>
+<p>return U_quant, R
+   ```</p>
+</li>
+<li>
+<p><strong>随机投影</strong>
+   ```
+   function sketch_subspace(U, Σ, sketch_size):
+       // Johnson-Lindenstrauss投影
+       S = randn(n, sketch_size) / sqrt(sketch_size)
+       Y = Sᵀ @ U @ Σ</p>
+<p>return Y  // sketch_size × k
+   ```</p>
+</li>
+<li>
+<p><strong>分层通信</strong>
+   - 频繁交换主要成分
+   - 稀疏交换次要成分
+   - 基于重要性的自适应频率</p>
+</li>
+</ol>
+<p><strong>拜占庭鲁棒性</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">byzantine_robust_aggregation</span><span class="p">(</span>sketches, f<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="p">=</span><span class="w"> </span>拜占庭节点数量上界
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>方法1<span class="p">:</span><span class="w"> </span>中位数聚合
+<span class="w">    </span><span class="n">median_sketch</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">geometric_median</span><span class="p">(</span><span class="n">sketches</span><span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>方法2<span class="p">:</span><span class="w"> </span>修剪均值
+<span class="w">    </span><span class="nb">distances</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">compute_distances</span><span class="p">(</span><span class="n">sketches</span><span class="p">)</span>
+<span class="w">    </span><span class="n">good_nodes</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">trim_outliers</span><span class="p">(</span><span class="nb">distances</span><span class="p">,</span><span class="w"> </span><span class="n">f</span><span class="p">)</span>
+<span class="w">    </span><span class="n">robust_mean</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">mean</span><span class="p">(</span><span class="n">sketches</span><span class="p">[</span><span class="n">good_nodes</span><span class="p">])</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">robust_mean</span>
+</code></pre></div>
+
+<p><strong>高级通信协议</strong>：</p>
+<p><strong>1. 渐进式精度协议</strong>：</p>
+<div class="codehilite"><pre><span></span><code>初始阶段：交换低精度sketch (1-2 bits)
+中期阶段：提高到中等精度 (8-16 bits)
+最终阶段：全精度交换关键成分
+优势：早期快速收敛，后期精确对齐
+</code></pre></div>
+
+<p><strong>2. 异步Gossip SVD</strong>：</p>
+<div class="codehilite"><pre><span></span><code>每个节点维护邻居列表N(i)
+随机选择邻居j ∈ N(i)
+交换并平均子空间：
+  U_i^new = geodesic_mean(U_i, U_j)
+  U_j^new = U_i^new
+收敛速度：O(log m / λ₂(G))
+</code></pre></div>
+
+<p>其中$\lambda_2(G)$是通信图的第二大特征值。</p>
+<p><strong>3. 分层聚合树</strong>：</p>
+<div class="codehilite"><pre><span></span><code>叶节点：本地SVD更新
+中间节点：合并子树结果
+根节点：全局SVD
+优势：通信复杂度O(log m)
+缺点：单点故障风险
+</code></pre></div>
+
+<p><strong>实际系统考虑</strong>：</p>
+<p><strong>带宽感知调度</strong>：</p>
+<ul>
+<li>测量节点间带宽：$B_{ij}$</li>
+<li>优先高带宽链路通信</li>
+<li>自适应调整通信频率</li>
+</ul>
+<p><strong>容错机制</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">robustAggregation</span><span class="p">(</span>sketches<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>检测异常值
+<span class="w">    </span><span class="nb">median</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">geometric_median</span><span class="p">(</span><span class="n">sketches</span><span class="p">)</span>
+<span class="w">    </span><span class="n">deviations</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="n">distance</span><span class="p">(</span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="nb">median</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="n">sketches</span><span class="p">]</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>移除异常
+<span class="w">    </span><span class="n">threshold</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">median</span><span class="p">(</span><span class="n">deviations</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">3</span>
+<span class="w">    </span><span class="n">valid</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="n">s</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="n">d</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="nb">zip</span><span class="p">(</span><span class="n">sketches</span><span class="p">,</span><span class="w"> </span><span class="n">deviations</span><span class="p">)</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">d</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">threshold</span><span class="p">]</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>加权聚合
+<span class="w">    </span><span class="n">weights</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="mi">1</span><span class="o">/</span><span class="n">d</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">d</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="n">valid_deviations</span><span class="p">]</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">weighted_mean</span><span class="p">(</span><span class="n">valid</span><span class="p">,</span><span class="w"> </span><span class="n">weights</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>研究方向</strong>：</p>
+<ul>
+<li>基于草图的分布式SVD通信压缩</li>
+<li>去中心化共识SVD算法</li>
+<li>异构数据分布下的理论分析</li>
+<li>动态网络拓扑下的适应性算法</li>
+<li>差分隐私保护的分布式PCA</li>
+<li>联邦学习框架下的安全SVD</li>
+<li>量子通信加速的可能性</li>
+</ul>
+<h2 id="133">13.3 自适应秩选择</h2>
+<h3 id="1331">13.3.1 在线模型选择理论</h3>
+<p>流式环境下的秩选择面临独特挑战：需在观察完整数据前做出决策。核心权衡：</p>
+<ul>
+<li>秩过小：欠拟合，丢失重要信息</li>
+<li>秩过大：计算/存储开销，过拟合噪声</li>
+</ul>
+<p><strong>定义13.1</strong>（在线秩选择regret）：
+$$R_k(T) = \sum_{t=1}^T |\mathbf{A}_t - \tilde{\mathbf{A}}_{t,k_t}|_F^2 - \min_{k^*} \sum_{t=1}^T |\mathbf{A}_t - \tilde{\mathbf{A}}_{t,k^*}|_F^2$$
+其中$k_t$是算法在时刻$t$选择的秩。</p>
+<h3 id="1332">13.3.2 能量阈值方法</h3>
+<p><strong>算法13.4</strong>：自适应能量阈值</p>
+<div class="codehilite"><pre><span></span><code>参数：能量保留比例τ ∈ (0,1)
+维护：奇异值{σᵢ}及对应向量
+1. 更新奇异值分解
+2. 计算累积能量：Eⱼ = Σᵢ₌₁ʲ σᵢ² / Σᵢ σᵢ²
+3. 选择秩：k* = min{j : Eⱼ ≥ τ}
+4. 自适应调整τ基于历史性能
+</code></pre></div>
+
+<p><strong>定理13.3</strong>：在平稳假设下，自适应能量阈值达到
+$$\mathbb{E}[R_k(T)] \leq O(\sqrt{T\log K})$$
+其中$K$是最大允许秩。</p>
+<p><strong>证明思路</strong>：
+使用在线学习的expert advice框架：</p>
+<ol>
+<li>将每个可能的秩$k \in {1, ..., K}$视为expert</li>
+<li>使用exponential weights算法选择秩</li>
+<li>利用能量集中性质得到更紧的界</li>
+</ol>
+<p><strong>实用增强版本</strong>：</p>
+<p><strong>动态阈值调整</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">adaptThreshold</span><span class="p">(</span>τ, history<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>计算近期重构误差
+<span class="w">    </span><span class="n">recent_error</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">mean</span><span class="p">(</span><span class="n">history</span><span class="p">[</span><span class="o">-</span><span class="n">window</span><span class="p">:])</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>误差趋势分析
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">increasing_trend</span><span class="p">(</span><span class="n">history</span><span class="p">):</span>
+<span class="w">        </span>τ<span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">min</span><span class="p">(</span>τ<span class="w"> </span><span class="o">+</span><span class="w"> </span>Δτ<span class="p">,</span><span class="w"> </span><span class="mf">0.99</span><span class="p">)</span><span class="w">  </span><span class="o">//</span><span class="w"> </span>需要更多能量
+<span class="w">    </span><span class="n">elif</span><span class="w"> </span><span class="n">stable_low_error</span><span class="p">(</span><span class="n">history</span><span class="p">):</span>
+<span class="w">        </span>τ<span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">max</span><span class="p">(</span>τ<span class="w"> </span><span class="o">-</span><span class="w"> </span>Δτ<span class="p">,</span><span class="w"> </span><span class="mf">0.90</span><span class="p">)</span><span class="w">  </span><span class="o">//</span><span class="w"> </span>可以减少能量
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span>τ
+</code></pre></div>
+
+<p><strong>多尺度能量分析</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">multiScaleEnergy</span><span class="p">(</span>σ_values<span class="p">):</span>
+<span class="w">    </span><span class="n">scales</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="mi">20</span><span class="p">]</span><span class="w">  </span><span class="o">//</span><span class="w"> </span>不同观察尺度
+<span class="w">    </span><span class="n">energy_profiles</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[]</span>
+
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="n">scales</span><span class="p">:</span>
+<span class="w">        </span><span class="o">//</span><span class="w"> </span>计算前<span class="n">s个奇异值的能量比</span>
+<span class="w">        </span><span class="n">E_s</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">sum</span><span class="p">(</span>σ²<span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="n">s</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">sum</span><span class="p">(</span>σ²<span class="p">)</span>
+<span class="w">        </span><span class="n">energy_profiles</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">E_s</span><span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>检测“肘部”位置
+<span class="w">    </span><span class="n">k_elbow</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">detectElbow</span><span class="p">(</span><span class="n">energy_profiles</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">k_elbow</span>
+</code></pre></div>
+
+<p><strong>噪声鲁棒性考虑</strong>：</p>
+<p>当数据包含噪声时，需要避免过拟合：</p>
+<p><strong>Marcenko-Pastur律应用</strong>：
+对于随机矩阵，奇异值分布遍循：
+$$\rho(\sigma) = \frac{1}{2\pi\sigma c}\sqrt{(\sigma_+ - \sigma)(\sigma - \sigma_-)}$$
+其中$\sigma_\pm = (1 \pm \sqrt{c})^2$，$c = n/T$。</p>
+<p><strong>噪声阈值策略</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">noiseAwareRank</span><span class="p">(</span>σ_values, n, T<span class="p">):</span>
+<span class="w">    </span><span class="n">c</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">n</span><span class="o">/</span><span class="n">T</span>
+<span class="w">    </span>σ<span class="n">_threshold</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span>√<span class="n">c</span><span class="p">)</span>²<span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">noise_level</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>只保留显著大于噪声的奇异值
+<span class="w">    </span><span class="n">k</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">sum</span><span class="p">(</span>σ<span class="n">_values</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span>σ<span class="n">_threshold</span><span class="p">)</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">max</span><span class="p">(</span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w">  </span><span class="o">//</span><span class="w"> </span>至少保留一个
+</code></pre></div>
+
+<h3 id="1333">13.3.3 基于预测的秩选择</h3>
+<p>利用奇异值衰减模式预测未来：</p>
+<p><strong>模型假设</strong>：</p>
+<ol>
+<li>幂律衰减：$\sigma_i \sim i^{-\alpha}$</li>
+<li>指数衰减：$\sigma_i \sim e^{-\beta i}$</li>
+<li>混合模型：组合多种衰减模式</li>
+</ol>
+<p><strong>算法13.5</strong>：预测性秩选择</p>
+<div class="codehilite"><pre><span></span><code><span class="mf">1.</span><span class="w"> </span><span class="n">在线估计衰减参数α或β</span>
+<span class="mf">2.</span><span class="w"> </span><span class="n">预测未来L步的奇异值分布</span>
+<span class="mf">3.</span><span class="w"> </span><span class="n">选择秩k最小化预期误差</span><span class="err">：</span>
+<span class="w">   </span><span class="n">k</span><span class="o">*</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">argmin_k</span><span class="w"> </span><span class="n">E</span><span class="err">[</span><span class="n">Σₜ</span><span class="err">₊</span><span class="n">₁ᵗ</span><span class="err">⁺</span><span class="n">ᴸ</span><span class="w"> </span><span class="err">‖</span><span class="n">Aₜ</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">Ãₜ</span><span class="p">,</span><span class="n">ₖ</span><span class="err">‖</span><span class="n">²</span><span class="err">]</span>
+<span class="mf">4.</span><span class="w"> </span><span class="n">使用滑动窗口更新参数估计</span>
+</code></pre></div>
+
+<p><strong>详细的参数估计方法</strong>：</p>
+<p><strong>1. 幂律模型的在线估计</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">estimatePowerLaw</span><span class="p">(</span>σ_history<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>取对数变换
+<span class="w">    </span><span class="n">log_i</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">log</span><span class="p">(</span><span class="mi">1</span><span class="p">:</span><span class="nb">length</span><span class="p">(</span>σ<span class="p">))</span>
+<span class="w">    </span><span class="n">log_σ</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">log</span><span class="p">(</span>σ<span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>加权最小二乘
+<span class="w">    </span><span class="n">weights</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="o">./</span><span class="nb">sqrt</span><span class="p">(</span><span class="mi">1</span><span class="p">:</span><span class="nb">length</span><span class="p">(</span>σ<span class="p">))</span><span class="w">  </span><span class="o">//</span><span class="w"> </span>前面的奇异值更重要
+<span class="w">    </span>α<span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="o">-</span><span class="n">weightedLeastSquares</span><span class="p">(</span><span class="n">log_i</span><span class="p">,</span><span class="w"> </span><span class="n">log_σ</span><span class="p">,</span><span class="w"> </span><span class="n">weights</span><span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>鲁棒性检查
+<span class="w">    </span><span class="n">residuals</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">log_σ</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="p">(</span><span class="o">-</span>α<span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">log_i</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nb">max</span><span class="p">(</span><span class="nb">abs</span><span class="p">(</span><span class="n">residuals</span><span class="p">))</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">threshold</span><span class="p">:</span>
+<span class="w">        </span><span class="o">//</span><span class="w"> </span>使用<span class="n">Huber回归</span>
+<span class="w">        </span>α<span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">huberRegression</span><span class="p">(</span><span class="n">log_i</span><span class="p">,</span><span class="w"> </span><span class="n">log_σ</span><span class="p">)</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span>α
+</code></pre></div>
+
+<p><strong>2. 指数模型的自适应估计</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">estimateExponential</span><span class="p">(</span>σ_history, window<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>使用最近的<span class="n">window个点</span>
+<span class="w">    </span><span class="n">recent_σ</span><span class="w"> </span><span class="p">=</span><span class="w"> </span>σ<span class="n">_history</span><span class="p">[</span><span class="o">-</span><span class="n">window</span><span class="p">:]</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span><span class="n">MLE估计</span>
+<span class="w">    </span>β<span class="n">_mle</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">mean</span><span class="p">(</span><span class="n">recent_σ</span><span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>贝叶斯更新（结合先验）
+<span class="w">    </span><span class="n">prior_mean</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">median</span><span class="p">(</span>σ<span class="n">_history</span><span class="p">)</span>
+<span class="w">    </span><span class="n">prior_weight</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mf">0.1</span>
+
+<span class="w">    </span>β<span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="o">-</span><span class="n">prior_weight</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span>β<span class="n">_mle</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">prior_weight</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">prior_mean</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span>β
+</code></pre></div>
+
+<p><strong>3. 混合模型识别</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">identifyDecayPattern</span><span class="p">(</span>σ<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>计算不同模型的拟合度
+<span class="w">    </span><span class="n">power_fit</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">fitPowerLaw</span><span class="p">(</span>σ<span class="p">)</span>
+<span class="w">    </span><span class="n">exp_fit</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">fitExponential</span><span class="p">(</span>σ<span class="p">)</span>
+<span class="w">    </span><span class="n">mixed_fit</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">fitMixedModel</span><span class="p">(</span>σ<span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span><span class="n">AIC准则选择</span>
+<span class="w">    </span><span class="n">aic_power</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">AIC</span><span class="p">(</span><span class="n">power_fit</span><span class="p">,</span><span class="w"> </span>σ<span class="p">)</span>
+<span class="w">    </span><span class="n">aic_exp</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">AIC</span><span class="p">(</span><span class="n">exp_fit</span><span class="p">,</span><span class="w"> </span>σ<span class="p">)</span>
+<span class="w">    </span><span class="n">aic_mixed</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">AIC</span><span class="p">(</span><span class="n">mixed_fit</span><span class="p">,</span><span class="w"> </span>σ<span class="p">)</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">argmin</span><span class="p">([</span><span class="n">aic_power</span><span class="p">,</span><span class="w"> </span><span class="n">aic_exp</span><span class="p">,</span><span class="w"> </span><span class="n">aic_mixed</span><span class="p">])</span>
+</code></pre></div>
+
+<p><strong>预测误差的理论分析</strong>：</p>
+<p><strong>定理13.6</strong>（预测误差界）：设真实衰减率为$\alpha_*$，估计值为$\hat{\alpha}_t$，则：
+$$\mathbb{E}[\text{PredErr}_t] \leq C_1 \cdot \mathbb{E}[|\hat{\alpha}_t - \alpha_*|] + C_2 \cdot \frac{\log t}{t}$$
+第一项来自参数估计误差，第二项来自有限样本效应。</p>
+<p><strong>实用策略：保守选择</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">conservativeRankSelection</span><span class="p">(</span>predicted_k, confidence<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>加入安全边界
+<span class="w">    </span><span class="n">safety_margin</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">ceil</span><span class="p">(</span><span class="n">predicted_k</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">confidence</span><span class="p">))</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>考虑预测不确定性
+<span class="w">    </span><span class="n">uncertainty</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">estimatePredictionUncertainty</span><span class="p">()</span>
+<span class="w">    </span><span class="n">extra_ranks</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">ceil</span><span class="p">(</span><span class="mi">2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nb">sqrt</span><span class="p">(</span><span class="n">uncertainty</span><span class="p">))</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">predicted_k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">safety_margin</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">extra_ranks</span>
+</code></pre></div>
+
+<h3 id="1334">13.3.4 贝叶斯秩选择</h3>
+<p>将秩视为隐变量，使用在线贝叶斯推断：</p>
+<p><strong>概率模型</strong>：
+$$p(\mathbf{A}|k) = \mathcal{MN}(\mathbf{0}, \mathbf{I}_n, \boldsymbol{\Sigma}_k)$$
+其中$\boldsymbol{\Sigma}_k$是秩$k$协方差。</p>
+<p><strong>在线推断</strong>：</p>
+<ol>
+<li>维护秩的后验分布$p(k|D_{1:t})$</li>
+<li>使用粒子滤波或变分推断更新</li>
+<li>选择MAP估计或后验期望</li>
+</ol>
+<p><strong>详细的贝叶斯框架</strong>：</p>
+<p><strong>先验设计</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1">// 基于领域知识的先验</span>
+π<span class="p">(</span><span class="n">k</span><span class="p">)</span><span class="w"> </span>∝<span class="w"> </span><span class="n">k</span>^<span class="p">{</span><span class="o">-</span>γ<span class="p">}</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nb">exp</span><span class="p">(</span><span class="o">-</span>λ<span class="o">*</span><span class="n">k</span><span class="p">)</span><span class="w">  </span><span class="c1">// 偏好低秩</span>
+
+<span class="c1">// 参数选择</span>
+γ<span class="p">:</span><span class="w"> </span>控制幂律衰减<span class="w"> </span><span class="p">(</span><span class="n">typical</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="o">-</span><span class="mi">2</span><span class="p">)</span>
+λ<span class="p">:</span><span class="w"> </span>控制指数惩罚<span class="w"> </span><span class="p">(</span><span class="n">typical</span><span class="p">:</span><span class="w"> </span><span class="mf">0.01</span><span class="o">-</span><span class="mf">0.1</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>似然模型</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1">// 概率性PCA模型</span>
+<span class="n">p</span><span class="p">(</span>σ²<span class="n">_i</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">InverseGamma</span><span class="p">(</span>α<span class="p">,</span><span class="w"> </span>β<span class="p">),</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">i</span><span class="w"> </span>≤<span class="w"> </span><span class="n">k</span><span class="w">  </span><span class="c1">// 信号奇异值</span>
+<span class="w">    </span><span class="n">InverseGamma</span><span class="p">(</span>α<span class="n">_0</span><span class="p">,</span><span class="w"> </span>β<span class="n">_0</span><span class="p">),</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">k</span><span class="w">  </span><span class="c1">// 噪声奇异值</span>
+<span class="p">}</span>
+
+<span class="c1">// 参数学习</span>
+α<span class="p">,</span><span class="w"> </span>β<span class="p">:</span><span class="w"> </span>从数据中学习
+α<span class="n">_0</span><span class="p">,</span><span class="w"> </span>β<span class="n">_0</span><span class="p">:</span><span class="w"> </span>噪声先验
+</code></pre></div>
+
+<p><strong>在线更新算法</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">bayesianRankUpdate</span><span class="p">(</span>posterior_t, new_data<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>计算每个秩的似然
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="mi">1</span><span class="p">:</span><span class="n">K_max</span><span class="p">:</span>
+<span class="w">        </span><span class="n">likelihood</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">computeLikelihood</span><span class="p">(</span><span class="n">new_data</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>贝叶斯更新
+<span class="w">    </span><span class="n">posterior_t</span><span class="o">+</span><span class="mi">1</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">posterior_t</span><span class="w"> </span><span class="o">.*</span><span class="w"> </span><span class="n">likelihood</span>
+<span class="w">    </span><span class="n">posterior_t</span><span class="o">+</span><span class="mi">1</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">posterior_t</span><span class="o">+</span><span class="mi">1</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">sum</span><span class="p">(</span><span class="n">posterior_t</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>防止数值下溢
+<span class="w">    </span><span class="n">posterior_t</span><span class="o">+</span><span class="mi">1</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">renormalize</span><span class="p">(</span><span class="n">posterior_t</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">posterior_t</span><span class="o">+</span><span class="mi">1</span>
+</code></pre></div>
+
+<p><strong>变分推断加速</strong>：</p>
+<p>为避免计算所有$K$个可能秩的似然：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">variationalRankInference</span><span class="p">(</span>data<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>变分分布<span class="p">:</span><span class="w"> </span><span class="n">q</span><span class="p">(</span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">Categorical</span><span class="p">(</span>π<span class="p">)</span>
+<span class="w">    </span>π<span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">uniform</span><span class="p">(</span><span class="n">K_max</span><span class="p">)</span>
+
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">iter</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="mi">1</span><span class="p">:</span><span class="n">max_iters</span><span class="p">:</span>
+<span class="w">        </span><span class="o">//</span><span class="w"> </span><span class="n">E</span><span class="o">-</span><span class="nb">step</span><span class="p">:</span><span class="w"> </span>更新秩分布
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="mi">1</span><span class="p">:</span><span class="n">K_max</span><span class="p">:</span>
+<span class="w">            </span>π<span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="w"> </span>∝<span class="w"> </span><span class="nb">exp</span><span class="p">(</span><span class="n">ELBO</span><span class="p">(</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="p">))</span>
+<span class="w">        </span>π<span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">normalize</span><span class="p">(</span>π<span class="p">)</span>
+
+<span class="w">        </span><span class="o">//</span><span class="w"> </span><span class="n">M</span><span class="o">-</span><span class="nb">step</span><span class="p">:</span><span class="w"> </span>更新模型参数
+<span class="w">        </span><span class="n">updateModelParams</span><span class="p">(</span><span class="n">data</span><span class="p">,</span><span class="w"> </span>π<span class="p">)</span>
+
+<span class="w">        </span><span class="o">//</span><span class="w"> </span>收敛检查
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">converged</span><span class="p">(</span>π<span class="p">):</span>
+<span class="w">            </span><span class="k">break</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span>π
+</code></pre></div>
+
+<p><strong>实时决策策略</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">function</span><span class="w"> </span><span class="nf">selectRank</span><span class="p">(</span>posterior, risk_aversion<span class="p">):</span>
+<span class="w">    </span><span class="o">//</span><span class="w"> </span><span class="n">MAP估计</span>（最激进）
+<span class="w">    </span><span class="n">k_map</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">argmax</span><span class="p">(</span><span class="n">posterior</span><span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>后验均值（平衡）
+<span class="w">    </span><span class="n">k_mean</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">sum</span><span class="p">(</span><span class="n">k</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">posterior</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="mi">1</span><span class="p">:</span><span class="n">K_max</span><span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>风险敏感决策
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>最小化预期损失<span class="p">:</span><span class="w"> </span><span class="n">L</span><span class="p">(</span><span class="n">k</span><span class="p">,</span><span class="n">k</span><span class="o">&#39;</span><span class="p">)</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="o">|</span><span class="n">k</span><span class="o">-</span><span class="n">k</span><span class="o">&#39;|</span>^α
+<span class="w">    </span><span class="n">k_bayes</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">argmin_k</span><span class="w"> </span><span class="nb">sum</span><span class="p">(</span><span class="n">L</span><span class="p">(</span><span class="n">k</span><span class="p">,</span><span class="n">k</span><span class="o">&#39;</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">posterior</span><span class="p">[</span><span class="n">k</span><span class="o">&#39;</span><span class="p">]</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">k</span><span class="o">&#39;</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="mi">1</span><span class="p">:</span><span class="n">K_max</span><span class="p">)</span>
+
+<span class="w">    </span><span class="o">//</span><span class="w"> </span>根据风险偏好选择
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">risk_aversion</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s">&quot;low&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">k_map</span>
+<span class="w">    </span><span class="n">elif</span><span class="w"> </span><span class="n">risk_aversion</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s">&quot;medium&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">k_mean</span>
+<span class="w">    </span><span class="k">else</span><span class="p">:</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">k_bayes</span>
+</code></pre></div>
+
+<p><strong>研究方向</strong>：</p>
+<ul>
+<li>非平稱环境下的秩追踪</li>
+<li>多尺度秩选择（不同时间尺度不同秩）</li>
+<li>与在线核学习的联系</li>
+<li>分布式贝叶斯推断</li>
+<li>非参数贝叶斯方法（Dirichlet Process）</li>
+</ul>
+<h2 id="134">13.4 在线矩阵补全</h2>
+<h3 id="1341">13.4.1 流式观测模型</h3>
+<p>考虑部分观测的流式设定：</p>
+<ul>
+<li>时刻$t$：观测位置$(i_t, j_t)$的值$M_{i_t,j_t}$</li>
+<li>目标：实时预测未观测位置</li>
+<li>约束：低秩假设$\text{rank}(\mathbf{M}) \leq r$</li>
+</ul>
+<p><strong>形式化</strong>：在线学习协议</p>
+<div class="codehilite"><pre><span></span><code><span class="k">For</span><span class="w"> </span><span class="nv">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span>,<span class="w"> </span><span class="mi">2</span>,<span class="w"> </span>...,<span class="w"> </span><span class="nv">T</span>:
+<span class="w">  </span><span class="mi">1</span>.<span class="w"> </span>算法预测<span class="nv">M</span>̂ₜ（秩≤<span class="nv">r</span>）
+<span class="w">  </span><span class="mi">2</span>.<span class="w"> </span>对手选择<span class="ss">(</span><span class="nv">i</span>ₜ,<span class="w"> </span><span class="nv">j</span>ₜ<span class="ss">)</span>
+<span class="w">  </span><span class="mi">3</span>.<span class="w"> </span>观测真实值<span class="nv">M</span>ᵢₜ,ⱼₜ
+<span class="w">  </span><span class="mi">4</span>.<span class="w"> </span>遭受损失ℓₜ<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ss">(</span><span class="nv">M</span>̂ₜ[<span class="nv">i</span>ₜ,<span class="nv">j</span>ₜ]<span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">M</span>ᵢₜ,ⱼₜ<span class="ss">)</span>²
+</code></pre></div>
+
+<h3 id="1342">13.4.2 在线梯度下降方法</h3>
+<p>矩阵补全的因子分解形式：$\mathbf{M} \approx \mathbf{U}\mathbf{V}^T$</p>
+<p><strong>算法13.6</strong>：流式矩阵分解</p>
+<div class="codehilite"><pre><span></span><code>初始化：<span class="nv">U</span>₀,<span class="w"> </span><span class="nv">V</span>₀<span class="w"> </span>∈<span class="w"> </span>ℝⁿˣʳ
+<span class="k">For</span><span class="w"> </span><span class="nv">each</span>观测<span class="ss">(</span><span class="nv">i</span>,<span class="nv">j</span>,<span class="nv">M</span>ᵢⱼ<span class="ss">)</span>:
+<span class="w">  </span><span class="mi">1</span>.<span class="w"> </span>预测：<span class="nv">M</span>̂ᵢⱼ<span class="w"> </span><span class="o">=</span><span class="w"> </span>⟨<span class="nv">u</span>ᵢ,<span class="w"> </span><span class="nv">v</span>ⱼ⟩
+<span class="w">  </span><span class="mi">2</span>.<span class="w"> </span>梯度计算：
+<span class="w">     </span>∇ᵤᵢ<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">-</span><span class="mi">2</span><span class="ss">(</span><span class="nv">M</span>ᵢⱼ<span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">M</span>̂ᵢⱼ<span class="ss">)</span><span class="nv">v</span>ⱼ
+<span class="w">     </span>∇ᵥⱼ<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">-</span><span class="mi">2</span><span class="ss">(</span><span class="nv">M</span>ᵢⱼ<span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">M</span>̂ᵢⱼ<span class="ss">)</span><span class="nv">u</span>ᵢ
+<span class="w">  </span><span class="mi">3</span>.<span class="w"> </span>更新：
+<span class="w">     </span><span class="nv">u</span>ᵢ<span class="w"> </span>←<span class="w"> </span><span class="nv">u</span>ᵢ<span class="w"> </span><span class="o">-</span><span class="w"> </span>ηₜ∇ᵤᵢ
+<span class="w">     </span><span class="nv">v</span>ⱼ<span class="w"> </span>←<span class="w"> </span><span class="nv">v</span>ⱼ<span class="w"> </span><span class="o">-</span><span class="w"> </span>ηₜ∇ᵥⱼ
+<span class="w">  </span><span class="mi">4</span>.<span class="w"> </span>可选正则化<span class="o">/</span>投影步骤
+</code></pre></div>
+
+<p><strong>收敛性分析</strong>：</p>
+<ul>
+<li>凸松弛下：$O(\sqrt{T})$ regret</li>
+<li>非凸但满足RIP：线性收敛到局部最优</li>
+<li>一般情况：依赖初始化质量</li>
+</ul>
+<h3 id="1343-riemannian">13.4.3 Riemannian优化视角</h3>
+<p>将低秩约束视为流形约束：
+$$\mathcal{M}_r = {\mathbf{X} \in \mathbb{R}^{m \times n} : \text{rank}(\mathbf{X}) = r}$$
+<strong>算法13.7</strong>：在线Riemannian梯度下降</p>
+<div class="codehilite"><pre><span></span><code>维护：当前点Xₜ ∈ 𝓜ᵣ
+1. 计算欧氏梯度∇f(Xₜ)
+2. 投影到切空间：gradₜ = Proj_{TXₜ}(∇f)
+3. 沿测地线更新：
+   Xₜ₊₁ = Retr_Xₜ(-ηₜ gradₜ)
+</code></pre></div>
+
+<p>关键优势：</p>
+<ul>
+<li>自动满足秩约束</li>
+<li>更好的收敛性质</li>
+<li>自然处理矩阵的内在几何</li>
+</ul>
+<h3 id="1344">13.4.4 带边信息的在线补全</h3>
+<p>实际应用常有辅助信息（如用户特征、时间戳）：</p>
+<p><strong>模型扩展</strong>：
+$$M_{ij} = \langle \mathbf{u}_i, \mathbf{v}_j \rangle + f(\mathbf{x}_i, \mathbf{y}_j; \boldsymbol{\theta})$$
+其中$f$可以是：</p>
+<ul>
+<li>线性：$\boldsymbol{\theta}^T[\mathbf{x}_i; \mathbf{y}_j]$</li>
+<li>神经网络：更复杂的特征交互</li>
+<li>核方法：非线性但计算高效</li>
+</ul>
+<p><strong>在线学习策略</strong>：</p>
+<ol>
+<li>交替优化潜在因子和特征函数</li>
+<li>端到端梯度下降</li>
+<li>两阶段：先学特征再补全</li>
+</ol>
+<p><strong>研究方向</strong>：</p>
+<ul>
+<li>冷启动场景的理论保证</li>
+<li>非均匀采样下的无偏估计</li>
+<li>对抗性corruptions的鲁棒性</li>
+</ul>
+<h2 id="135">13.5 遗忘机制与概念漂移</h2>
+<h3 id="1351">13.5.1 指数遗忘模型</h3>
+<p>处理非平稳数据流的经典方法：</p>
+<p><strong>更新规则</strong>：
+$$\mathbf{A}_t = \gamma \mathbf{A}_{t-1} + \mathbf{x}_t\mathbf{x}_t^T$$
+其中$\gamma \in (0,1)$是遗忘因子。</p>
+<p><strong>性质分析</strong>：</p>
+<ul>
+<li>有效窗口长度：$\approx 1/(1-\gamma)$</li>
+<li>特征值衰减：$\lambda_i(t) = \gamma\lambda_i(t-1) + \text{新贡献}$</li>
+<li>偏差-方差权衡：$\gamma$越小适应越快但方差越大</li>
+</ul>
+<h3 id="1352">13.5.2 自适应遗忘因子</h3>
+<p><strong>算法13.8</strong>：基于变化检测的自适应遗忘</p>
+<div class="codehilite"><pre><span></span><code>维护：多个时间尺度的统计量
+<span class="mi">1</span>.<span class="w"> </span>短期统计：<span class="nv">S</span>ₛ<span class="w"> </span><span class="o">=</span><span class="w"> </span>最近<span class="nv">k</span>个样本
+<span class="mi">2</span>.<span class="w"> </span>长期统计：<span class="nv">S</span>ₗ<span class="w"> </span><span class="o">=</span><span class="w"> </span>指数平滑历史
+<span class="mi">3</span>.<span class="w"> </span>检测变化：<span class="nv">D</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">d</span><span class="ss">(</span><span class="nv">S</span>ₛ,<span class="w"> </span><span class="nv">S</span>ₗ<span class="ss">)</span>
+<span class="mi">4</span>.<span class="w"> </span>调整遗忘：
+<span class="w">   </span><span class="k">if</span><span class="w"> </span><span class="nv">D</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="nv">threshold</span>:
+<span class="w">     </span>γ<span class="w"> </span>←<span class="w"> </span><span class="nv">max</span><span class="ss">(</span>γ<span class="w"> </span><span class="o">-</span><span class="w"> </span>δ,<span class="w"> </span>γₘᵢₙ<span class="ss">)</span><span class="w">  </span>#<span class="w"> </span>加快遗忘
+<span class="w">   </span><span class="k">else</span>:
+<span class="w">     </span>γ<span class="w"> </span>←<span class="w"> </span><span class="nv">min</span><span class="ss">(</span>γ<span class="w"> </span><span class="o">+</span><span class="w"> </span>δ,<span class="w"> </span>γₘₐₓ<span class="ss">)</span><span class="w">  </span>#<span class="w"> </span>减慢遗忘
+</code></pre></div>
+
+<p><strong>理论保证</strong>：在分段平稳假设下，自适应算法达到
+$$\text{Regret} \leq O(\sqrt{T(1 + N_c)})$$
+其中$N_c$是变化点数量。</p>
+<h3 id="1353">13.5.3 滑动窗口技术</h3>
+<p>保持固定大小$W$的数据窗口：</p>
+<p><strong>精确滑窗SVD</strong>：</p>
+<div class="codehilite"><pre><span></span><code>数据结构：循环缓冲区存储最近W个样本
+更新策略：
+1. 加入新样本：秩1更新
+2. 移除旧样本：秩1降级（downdating）
+3. 周期性从头计算以控制误差累积
+</code></pre></div>
+
+<p><strong>近似滑窗方法</strong>：</p>
+<ul>
+<li>Sketching：维护数据的线性草图</li>
+<li>采样：概率保留历史样本</li>
+<li>分层：多分辨率时间表示</li>
+</ul>
+<h3 id="1354">13.5.4 多尺度遗忘</h3>
+<p>不同奇异向量可能有不同的时间尺度：</p>
+<p><strong>模型</strong>：
+$$\mathbf{u}_i(t) = \gamma_i \mathbf{u}_i(t-1) + \text{update}$$</p>
+<p>其中$\gamma_i$依赖于第$i$个模式的稳定性。</p>
+<p><strong>自动尺度发现</strong>：</p>
+<ol>
+<li>监控每个奇异向量的变化率</li>
+<li>稳定模式：大$\gamma_i$（慢遗忘）</li>
+<li>快变模式：小$\gamma_i$（快遗忘）</li>
+</ol>
+<p><strong>研究方向</strong>：</p>
+<ul>
+<li>连续时间遗忘过程的SDE建模</li>
+<li>遗忘机制的信息论分析</li>
+<li>与持续学习(continual learning)的统一框架</li>
+</ul>
+<h2 id="136">13.6 与神经网络压缩的联系</h2>
+<h3 id="1361">13.6.1 权重矩阵的动态低秩分解</h3>
+<p>深度网络中的权重矩阵$\mathbf{W} \in \mathbb{R}^{m \times n}$常呈现低秩结构：</p>
+<p><strong>在线压缩框架</strong>：</p>
+<div class="codehilite"><pre><span></span><code>训练过程中：
+1. 监控权重矩阵的有效秩
+2. 当检测到低秩结构时分解：W ≈ UV^T
+3. 继续以因子形式训练
+4. 周期性评估是否需要调整秩
+</code></pre></div>
+
+<p><strong>与剪枝的对比</strong>：</p>
+<ul>
+<li>剪枝：离散的0/1决策</li>
+<li>低秩：连续的子空间选择</li>
+<li>统一视角：都在减少有效自由度</li>
+</ul>
+<h3 id="1362-svd">13.6.2 增量SVD用于在线压缩</h3>
+<p><strong>算法13.9</strong>：训练时动态压缩</p>
+<div class="codehilite"><pre><span></span><code><span class="err">每</span><span class="n">E个epoch</span><span class="o">:</span>
+<span class="mi">1</span><span class="o">.</span><span class="w"> </span><span class="err">对当前权重</span><span class="n">W计算SVD</span>
+<span class="mi">2</span><span class="o">.</span><span class="w"> </span><span class="err">评估能量分布确定有效秩</span><span class="n">k</span>
+<span class="mi">3</span><span class="o">.</span><span class="w"> </span><span class="err">压缩：</span><span class="n">W</span><span class="w"> </span><span class="err">←</span><span class="w"> </span><span class="n">UₖΣₖVₖᵀ</span>
+<span class="mi">4</span><span class="o">.</span><span class="w"> </span><span class="err">可选：切换到因子形式继续训练</span>
+<span class="mi">5</span><span class="o">.</span><span class="w"> </span><span class="err">监控压缩对性能的影响</span>
+</code></pre></div>
+
+<p><strong>关键考虑</strong>：</p>
+<ul>
+<li>压缩时机：loss平台期vs.固定周期</li>
+<li>秩的自适应：基于梯度信息或验证性能</li>
+<li>与优化器状态的协调（如Adam的动量）</li>
+</ul>
+<h3 id="1363">13.6.3 彩票假说的低秩视角</h3>
+<p><strong>彩票假说</strong>：随机初始化的网络包含能独立训练到同等精度的稀疏子网络。</p>
+<p><strong>低秩重述</strong>：</p>
+<ul>
+<li>稀疏mask $\leftrightarrow$ 低秩投影</li>
+<li>寻找"中奖彩票" $\leftrightarrow$ 发现主要子空间</li>
+<li>迭代剪枝 $\leftrightarrow$ 渐进秩减少</li>
+</ul>
+<p><strong>实验观察</strong>：</p>
+<ol>
+<li>早期训练快速形成低秩结构</li>
+<li>后期训练主要是细化已有结构</li>
+<li>不同层的秩演化模式不同</li>
+</ol>
+<h3 id="1364">13.6.4 持续学习中的子空间管理</h3>
+<p>在序列任务学习中防止遗忘：</p>
+<p><strong>策略13.1</strong>：正交子空间分配</p>
+<div class="codehilite"><pre><span></span><code><span class="err">对每个新任务</span><span class="n">t</span><span class="o">:</span>
+<span class="mi">1</span><span class="o">.</span><span class="w"> </span><span class="err">识别之前任务使用的子空间</span><span class="n">Uₚᵣₑᵥ</span>
+<span class="mi">2</span><span class="o">.</span><span class="w"> </span><span class="err">在正交补空间中学习：</span><span class="n">U</span><span class="err">⊥</span>
+<span class="mi">3</span><span class="o">.</span><span class="w"> </span><span class="err">合并：</span><span class="n">Uₜₒₜₐₗ</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="n">Uₚᵣₑᵥ</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">Uₙₑw</span><span class="o">]</span>
+<span class="mi">4</span><span class="o">.</span><span class="w"> </span><span class="err">当空间耗尽时压缩或合并</span>
+</code></pre></div>
+
+<p><strong>策略13.2</strong>：弹性权重巩固(EWC)的低秩版本</p>
+<ul>
+<li>原始EWC：保护重要参数</li>
+<li>低秩EWC：保护重要子空间</li>
+<li>计算Fisher信息矩阵的低秩近似</li>
+</ul>
+<p><strong>研究方向</strong>：</p>
+<ul>
+<li>任务相似度与子空间重叠的关系</li>
+<li>最优子空间分配策略</li>
+<li>与元学习的理论联系</li>
+</ul>
+<h2 id="_2">本章小结</h2>
+<p>本章系统介绍了动态低秩近似的理论与算法：</p>
+<p><strong>核心概念</strong>：</p>
+<ol>
+<li><strong>流式SVD更新</strong>：Brand算法及其变体实现$O(nk)$复杂度的增量更新</li>
+<li><strong>自适应秩选择</strong>：能量阈值、预测模型、贝叶斯方法处理模型选择</li>
+<li><strong>在线矩阵补全</strong>：梯度方法、Riemannian优化处理流式观测</li>
+<li><strong>遗忘机制</strong>：指数衰减、滑动窗口、自适应遗忘处理概念漂移</li>
+<li><strong>神经网络联系</strong>：低秩结构在深度学习压缩和持续学习中的应用</li>
+</ol>
+<p><strong>关键公式</strong>：</p>
+<ul>
+<li>Bunch-Nielsen更新：$\mathbf{A}' = \mathbf{A} + \mathbf{c}\mathbf{d}^T$的SVD增量计算</li>
+<li>在线regret界：$R_T \leq O(k\log T \cdot \sum_{j&gt;k}\lambda_j)$</li>
+<li>遗忘因子更新：$\mathbf{A}_t = \gamma\mathbf{A}_{t-1} + \mathbf{x}_t\mathbf{x}_t^T$</li>
+<li>能量保留准则：$k^* = \min{j : \sum_{i=1}^j \sigma_i^2 \geq \tau \sum_i \sigma_i^2}$</li>
+</ul>
+<p><strong>实践要点</strong>：</p>
+<ul>
+<li>数值稳定性需要周期性重正交化</li>
+<li>秩选择与计算资源的权衡</li>
+<li>非平稳环境需要自适应机制</li>
+<li>分布式场景的通信优化</li>
+</ul>
+<h2 id="_3">练习题</h2>
+<h3 id="_4">基础题</h3>
+<p><strong>习题13.1</strong>：推导秩一更新的计算复杂度
+给定$n \times n$矩阵的SVD和秩一更新$\mathbf{u}\mathbf{v}^T$，证明更新后的SVD可在$O(n^2)$时间内计算。</p>
+<details>
+<summary>提示</summary>
+<p>利用Woodbury矩阵恒等式和SVD的扰动理论。</p>
+</details>
+<p><strong>习题13.2</strong>：设计滑动窗口SVD算法
+实现保持最近$W$个样本的精确SVD，分析添加新样本和删除旧样本的复杂度。</p>
+<details>
+<summary>提示</summary>
+<p>考虑downdating技术和数值稳定性问题。</p>
+</details>
+<p><strong>习题13.3</strong>：比较不同遗忘因子
+对于$\gamma \in {0.9, 0.95, 0.99}$，计算有效窗口长度，并分析其对突变检测的影响。</p>
+<details>
+<summary>提示</summary>
+<p>有效窗口长度约为$1/(1-\gamma)$。</p>
+</details>
+<p><strong>习题13.4</strong>：在线矩阵补全的收敛性
+证明在强凸假设下，在线梯度下降达到$O(\log T)$ regret。</p>
+<details>
+<summary>提示</summary>
+<p>使用在线凸优化的标准分析技术。</p>
+</details>
+<h3 id="_5">挑战题</h3>
+<p><strong>习题13.5</strong>：非均匀采样的偏差校正
+在矩阵补全中，若位置$(i,j)$以概率$p_{ij}$被观测，设计无偏估计算法。</p>
+<details>
+<summary>提示</summary>
+<p>使用重要性采样和inverse propensity weighting。</p>
+</details>
+<p><strong>习题13.6</strong>：多尺度遗忘的最优性
+证明对于分层时间序列数据，多尺度遗忘优于单一遗忘因子。构造具体反例。</p>
+<details>
+<summary>提示</summary>
+<p>考虑包含快变和慢变成分的合成数据。</p>
+</details>
+<p><strong>习题13.7</strong>：分布式流式PCA的通信下界
+$m$个节点观测数据流，证明达到$\epsilon$-近似需要$\Omega(mk/\epsilon)$通信量。</p>
+<details>
+<summary>提示</summary>
+<p>使用信息论下界和通信复杂度理论。</p>
+</details>
+<p><strong>习题13.8</strong>：神经网络压缩的理论保证
+给定预训练网络，证明存在秩$k$分解使得精度损失不超过$\epsilon$，其中$k$如何依赖于$\epsilon$？</p>
+<details>
+<summary>提示</summary>
+<p>结合矩阵扰动理论和神经网络的Lipschitz性质。</p>
+</details>
+<h2 id="gotchas">常见陷阱与错误 (Gotchas)</h2>
+<ol>
+<li>
+<p><strong>数值误差累积</strong>：长时间运行的增量算法会累积舍入误差
+   - 解决方案：周期性从零开始重算
+   - 监控正交性：检查$|\mathbf{U}^T\mathbf{U} - \mathbf{I}|$</p>
+</li>
+<li>
+<p><strong>秩爆炸问题</strong>：没有及时截断会导致秩不断增长
+   - 设置最大秩限制
+   - 使用能量阈值自动截断</p>
+</li>
+<li>
+<p><strong>遗忘因子选择</strong>：固定遗忘因子在变化环境下表现差
+   - 使用自适应方法
+   - 监控预测误差调整</p>
+</li>
+<li>
+<p><strong>并发更新冲突</strong>：分布式环境下的数据竞争
+   - 使用lock-free数据结构
+   - 设计异步友好的算法</p>
+</li>
+<li>
+<p><strong>初始化敏感性</strong>：在线算法可能收敛到次优解
+   - 使用多次随机初始化
+   - 借鉴离线算法的初始化策略</p>
+</li>
+</ol>
+<h2 id="_6">最佳实践检查清单</h2>
+<h3 id="_7">算法设计阶段</h3>
+<ul>
+<li>[ ] 明确数据流特性（平稳性、到达率、噪声水平）</li>
+<li>[ ] 确定精度vs.效率的权衡点</li>
+<li>[ ] 选择合适的秩选择策略</li>
+<li>[ ] 设计异常检测和恢复机制</li>
+</ul>
+<h3 id="_8">实现阶段</h3>
+<ul>
+<li>[ ] 使用数值稳定的更新公式</li>
+<li>[ ] 实现高效的数据结构（循环缓冲、优先队列）</li>
+<li>[ ] 添加正交性检查和自动修正</li>
+<li>[ ] 支持checkpoint和恢复</li>
+</ul>
+<h3 id="_9">调优阶段</h3>
+<ul>
+<li>[ ] 监控关键指标（近似误差、计算时间、内存使用）</li>
+<li>[ ] 根据数据特性调整超参数</li>
+<li>[ ] 评估不同遗忘策略的效果</li>
+<li>[ ] 测试极端情况（突变、缺失数据）</li>
+</ul>
+<h3 id="_10">部署阶段</h3>
+<ul>
+<li>[ ] 设置自动报警机制</li>
+<li>[ ] 实现优雅降级策略</li>
+<li>[ ] 准备离线重算方案</li>
+<li>[ ] 记录详细日志用于调试</li>
+</ul>
+            </article>
+            
+            <nav class="page-nav"><a href="./chapter12.html" class="nav-link prev">← 第12章：结构化矩阵的快速算法</a><a href="./chapter14.html" class="nav-link next">第14章：大规模协同过滤的矩阵技术 →</a></nav>
+        </main>
+    </div>
+</body>
+</html>

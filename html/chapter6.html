@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第6章：矩阵Sketching技术</title>
+    <link rel="stylesheet" href="./assets/style.css">
+    <link rel="stylesheet" href="./assets/highlight.css">
+    <script src="./assets/script.js" defer></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$']],
+                displayMath: [['$$', '$$']],
+                processEscapes: false,
+                packages: {'[+]': ['noerrors']}
+            },
+            options: {
+                ignoreHtmlClass: 'tex2jax_ignore',
+                processHtmlClass: 'tex2jax_process'
+            },
+            loader: {
+                load: ['[tex]/noerrors']
+            }
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <nav id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <h3>目录</h3>
+                <button id="sidebar-toggle" class="sidebar-toggle">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+            <ul class="nav-list"><li class=""><a href="./index.html">高级大规模矩阵计算教程</a></li><li class=""><a href="./chapter1.html">第1章：二阶优化的统一框架</a></li><li class=""><a href="./chapter2.html">第2章：Hessian近似的艺术</a></li><li class=""><a href="./chapter3.html">第3章：结构化二阶方法</a></li><li class=""><a href="./chapter4.html">第4章：增量Hessian计算</a></li><li class=""><a href="./chapter5.html">第5章：Schur补的妙用</a></li><li class="active"><a href="./chapter6.html">第6章：矩阵Sketching技术</a></li><li class=""><a href="./chapter7.html">第7章：随机化数值线性代数</a></li><li class=""><a href="./chapter8.html">第8章：分布式矩阵运算</a></li><li class=""><a href="./chapter9.html">第9章：异步优化的数学基础</a></li><li class=""><a href="./chapter10.html">第10章：Riemannian优化基础</a></li><li class=""><a href="./chapter11.html">第11章：流形预条件技术</a></li><li class=""><a href="./chapter12.html">第12章：结构化矩阵的快速算法</a></li><li class=""><a href="./chapter13.html">第13章：动态低秩近似</a></li><li class=""><a href="./chapter14.html">第14章：大规模协同过滤的矩阵技术</a></li><li class=""><a href="./chapter15.html">第15章：实时推荐的增量矩阵方法</a></li><li class=""><a href="./chapter16.html">第16章：多模态推荐的张量分解</a></li><li class=""><a href="./chapter17.html">第17章：隐式微分与双层优化</a></li><li class=""><a href="./chapter18.html">第18章：量子启发的矩阵算法</a></li><li class=""><a href="./chapter19.html">附录A：数值稳定性速查表</a></li><li class=""><a href="./chapter20.html">附录B：性能调优检查清单</a></li><li class=""><a href="./chapter21.html">附录C：常用矩阵恒等式</a></li><li class=""><a href="./CLAUDE.html">高级大规模矩阵计算教程项目说明</a></li><li class=""><a href="./README.html">高级大规模矩阵计算教程</a></li></ul>
+        </nav>
+        
+        <main class="content">
+            <article>
+                <h1 id="6sketching">第6章：矩阵Sketching技术</h1>
+<h2 id="_1">本章概述</h2>
+<p>矩阵sketching是现代大规模数据处理的核心技术之一，通过构造原始矩阵的低维"草图"来加速计算并降低存储需求。本章深入探讨sketching的数学基础、算法设计和实际应用，特别关注在深度学习和数据分析中的创新应用。我们将从Johnson-Lindenstrauss引理的实用化开始，逐步深入到CountSketch、Frequent Directions等前沿算法，并探讨这些技术在神经网络压缩中的应用潜力。</p>
+<h3 id="_2">学习目标</h3>
+<ul>
+<li>掌握维度约简的理论保证与实际界限</li>
+<li>理解不同sketching技术的适用场景</li>
+<li>学会设计问题特定的sketching方案</li>
+<li>探索sketching在现代AI系统中的应用</li>
+</ul>
+<h2 id="61-johnson-lindenstrauss">6.1 Johnson-Lindenstrauss引理的实用化</h2>
+<h3 id="611">6.1.1 从理论到实践的鸿沟</h3>
+<p>Johnson-Lindenstrauss (JL) 引理保证：对于 $n$ 个点，存在从 $\mathbb{R}^d$ 到 $\mathbb{R}^k$ 的映射，其中 $k = O(\log n / \epsilon^2)$，使得所有点对之间的距离以 $(1 \pm \epsilon)$ 因子保持。</p>
+<p><strong>理论界限与实际性能</strong>：</p>
+<ul>
+<li>理论：$k \geq 4(\epsilon^2/2 - \epsilon^3/3)^{-1} \log n$</li>
+<li>实践：通常需要 $k = O(\log n / \epsilon^2)$ 的常数倍</li>
+<li>关键观察：对于特定数据分布，可以获得更紧的界限</li>
+</ul>
+<p><strong>深入理解JL引理</strong>：</p>
+<p>JL引理的本质是利用高维空间中的集中现象（concentration of measure）。具体来说：</p>
+<ul>
+<li>在高维空间中，随机向量几乎正交</li>
+<li>随机投影保持了这种近似正交性</li>
+<li>距离保持是内积保持的自然结果</li>
+</ul>
+<p>数学形式化：对于任意 $\mathbf{x}, \mathbf{y} \in \mathbb{R}^d$，如果 $\mathbf{S} \in \mathbb{R}^{k \times d}$ 是适当的随机矩阵，则：
+$$\Pr[(1-\epsilon)|\mathbf{x}-\mathbf{y}|^2 \leq |\mathbf{S}(\mathbf{x}-\mathbf{y})|^2 \leq (1+\epsilon)|\mathbf{x}-\mathbf{y}|^2] \geq 1 - 2e^{-c\epsilon^2 k}$$
+其中 $c$ 是依赖于具体构造的常数。</p>
+<p><strong>实践中的关键挑战</strong>：</p>
+<ol>
+<li><strong>常数因子的影响</strong>：理论界限中的常数在实际应用中可能很大。例如，保证 $\epsilon = 0.1$ 的失真对于 $n = 10^6$ 个点，理论上需要 $k \approx 10^4$，但实践中可能需要 $2-3$ 倍。</li>
+</ol>
+<p><strong>精确分析</strong>：对于高斯随机投影，最优常数 $c \approx 1/4$，这意味着：
+$$k \geq \frac{8 \log(n) + 8\log(2/\delta)}{\epsilon^2}$$
+其中 $\delta$ 是失败概率。实践中，这个界限通常过于保守，因为：</p>
+<ul>
+<li>实际数据不是最坏情况分布</li>
+<li>应用往往能容忍少量失败</li>
+<li>可以使用后验验证来检测失败情况</li>
+</ul>
+<ol start="2">
+<li><strong>数据的内在维度</strong>：真实数据往往位于低维流形上。利用谱衰减可以显著降低所需维度：
+   - 如果数据的有效秩 $r_{eff} = \text{tr}(\mathbf{C})/|\mathbf{C}|_2 \ll d$（其中 $\mathbf{C}$ 是协方差矩阵）
+   - 则可以使用 $k = O(\log n / \epsilon^2 + r_{eff})$ 的维度</li>
+</ol>
+<p><strong>谱衰减的量化</strong>：设 $\lambda_1 \geq \lambda_2 \geq ... \geq \lambda_d$ 是协方差矩阵的特征值，定义：</p>
+<ul>
+<li>有效秩：$r_{eff} = (\sum_i \lambda_i)^2 / \sum_i \lambda_i^2$</li>
+<li>$\alpha$-有效秩：$r_\alpha = \min{k: \sum_{i=1}^k \lambda_i \geq \alpha \sum_i \lambda_i}$</li>
+<li>谱熵：$H = -\sum_i \frac{\lambda_i}{|\mathbf{C}|_*} \log \frac{\lambda_i}{|\mathbf{C}|_*}$</li>
+</ul>
+<p>这些度量提供了数据复杂度的不同视角，可以指导投影维度的选择。</p>
+<ol start="3">
+<li><strong>失真的非均匀性</strong>：JL保证是最坏情况的，但实际中：
+   - 大部分点对的失真远小于 $\epsilon$
+   - 可以接受少数点对有较大失真
+   - 使用自适应方法识别和特殊处理"困难"的点对</li>
+</ol>
+<p><strong>失真分布的经验规律</strong>：</p>
+<ul>
+<li>对于高斯数据，约95%的点对失真小于 $\epsilon/2$</li>
+<li>失真大于 $\epsilon$ 的点对通常对应于：<ul>
+<li>非常接近的点（小距离放大效应）</li>
+<li>位于数据分布尾部的异常点</li>
+<li>高度相关的点对</li>
+</ul>
+</li>
+</ul>
+<p><strong>自适应策略</strong>：</p>
+<ul>
+<li><strong>两阶段方法</strong>：先用较小的 $k$ 识别困难点对，然后增加维度或特殊处理</li>
+<li><strong>重要性加权</strong>：对关键点对分配更多的投影维度</li>
+<li><strong>局部敏感哈希</strong>：结合LSH技术处理近邻查询</li>
+</ul>
+<ol start="4">
+<li><strong>计算与存储的权衡</strong>：</li>
+</ol>
+<p><strong>时空复杂度分析</strong>：</p>
+<ul>
+<li>投影计算：$O(ndk)$ 浮点运算</li>
+<li>存储需求：$O(dk)$ 存储投影矩阵，$O(nk)$ 存储投影后数据</li>
+<li>距离计算：从 $O(d)$ 降至 $O(k)$ 每对</li>
+</ul>
+<p><strong>实际考虑</strong>：</p>
+<ul>
+<li>当 $k/d &lt; 0.3$ 时，投影通常是值得的</li>
+<li>对于稀疏数据，需要考虑稀疏性保持</li>
+<li>在线场景下，投影矩阵的生成和存储可能成为瓶颈</li>
+</ul>
+<ol start="5">
+<li><strong>数值稳定性问题</strong>：</li>
+</ol>
+<p>高维投影可能累积浮点误差：</p>
+<ul>
+<li><strong>Kahan求和</strong>：减少累加误差</li>
+<li><strong>分块计算</strong>：避免大规模点积</li>
+<li><strong>正交化</strong>：确保投影矩阵的条件数良好</li>
+</ul>
+<p><strong>误差界限</strong>：设机器精度为 $u$，则数值误差大致为：
+$$|\tilde{\mathbf{S}}\mathbf{x} - \mathbf{S}\mathbf{x}| \lesssim \sqrt{dk}u|\mathbf{S}||\mathbf{x}|$$</p>
+<h3 id="612">6.1.2 随机投影矩阵的构造</h3>
+<p><strong>高斯随机投影</strong>：
+$$\mathbf{S}_{ij} \sim \mathcal{N}(0, 1/k)$$
+优点：理论性质优美，旋转不变性
+缺点：计算密集，存储开销大</p>
+<p><strong>深入分析高斯投影</strong>：</p>
+<ol>
+<li>
+<p><strong>为什么是 $1/k$ 缩放</strong>：
+   - 保证 $\mathbb{E}[|\mathbf{S}\mathbf{x}|^2] = |\mathbf{x}|^2$
+   - 每个投影坐标的方差为 $|\mathbf{x}|^2/k$
+   - $k$ 个独立坐标的和接近 $|\mathbf{x}|^2$</p>
+</li>
+<li>
+<p><strong>旋转不变性的重要性</strong>：
+   - 高斯分布在正交变换下不变
+   - 意味着投影质量不依赖于坐标系选择
+   - 对于各向同性数据特别有效</p>
+</li>
+<li>
+<p><strong>集中性质</strong>：
+   对于单位向量 $\mathbf{x}$，投影长度的分布：
+$$|\mathbf{S}\mathbf{x}|^2 \sim \frac{1}{k}\chi^2_k$$
+利用卡方分布的集中性：
+$$\Pr[||\mathbf{S}\mathbf{x}|^2 - 1| &gt; \epsilon] \leq 2\exp(-k\epsilon^2/8)$$
+实现细节：</p>
+</li>
+</ol>
+<ul>
+<li>使用Box-Muller变换或Ziggurat算法生成高斯随机数</li>
+<li>批量生成以利用BLAS-3操作</li>
+<li>考虑使用低精度（如float16）在保持精度的同时加速</li>
+</ul>
+<p><strong>高效实现技巧</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1">// 伪代码：批量高斯投影</span>
+<span class="k">function</span><span class="w"> </span><span class="nf">gaussian_projection</span><span class="p">(</span>X, k<span class="p">):</span>
+<span class="w">    </span><span class="c1">// X: n×d 数据矩阵</span>
+<span class="w">    </span><span class="c1">// 生成投影矩阵，每次生成一个块</span>
+<span class="w">    </span><span class="n">block_size</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">min</span><span class="p">(</span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="n">available_memory</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="n">d</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">sizeof</span><span class="p">(</span><span class="n">float</span><span class="p">)))</span>
+<span class="w">    </span><span class="n">Y</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">zeros</span><span class="p">(</span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="p">)</span>
+
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="mi">0</span><span class="p">:</span><span class="n">k</span><span class="p">:</span><span class="n">block_size</span><span class="p">:</span>
+<span class="w">        </span><span class="n">S_block</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">randn</span><span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="n">block_size</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="o">-</span><span class="n">i</span><span class="p">),</span><span class="w"> </span><span class="n">d</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">sqrt</span><span class="p">(</span><span class="n">k</span><span class="p">)</span>
+<span class="w">        </span><span class="n">Y</span><span class="p">[:,</span><span class="w"> </span><span class="n">i</span><span class="p">:</span><span class="n">i</span><span class="o">+</span><span class="n">block_size</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">X</span><span class="w"> </span><span class="p">@</span><span class="w"> </span><span class="n">S_block</span><span class="p">.</span><span class="n">T</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">Y</span>
+</code></pre></div>
+
+<p><strong>稀疏随机投影</strong>（Achlioptas, 2003）：
+$$\mathbf{S}_{ij} = \sqrt{s/k} \times \begin{cases}
++1 &amp; \text{概率 } 1/(2s) \
+0 &amp; \text{概率 } 1-1/s \
+-1 &amp; \text{概率 } 1/(2s)
+\end{cases}$$
+其中 $s = 3$ 或 $s = \sqrt{d}$ 是常见选择。</p>
+<p>稀疏性的优势：</p>
+<ul>
+<li>存储需求：从 $O(kd)$ 降至 $O(kd/s)$</li>
+<li>计算加速：稀疏矩阵乘法</li>
+<li>实践建议：$s = 3$ 在大多数情况下效果良好</li>
+</ul>
+<p><strong>理论保证的细节</strong>：</p>
+<ul>
+<li>Li等人(2006)证明 $s = 3$ 时仍满足JL性质</li>
+<li>稀疏度 $s = \Omega(\log^2 n)$ 时可达到与高斯相同的界限</li>
+<li>实践中 $s = 3$ 已经足够，特别是当 $d$ 很大时</li>
+</ul>
+<p><strong>超稀疏投影</strong>：
+当 $s = \sqrt{d}$ 时，每行期望只有 $\sqrt{d}$ 个非零元素：</p>
+<ul>
+<li>存储：$O(k\sqrt{d})$</li>
+<li>计算：$O(nk\sqrt{d})$</li>
+<li>适用于超高维稀疏数据（如文本、基因组数据）</li>
+</ul>
+<p><strong>快速JL变换</strong>（Ailon &amp; Chazelle, 2009）：
+$$\mathbf{S} = \sqrt{d/k} \cdot \mathbf{P} \mathbf{H} \mathbf{D}$$
+其中：</p>
+<ul>
+<li>$\mathbf{D}$：随机对角符号矩阵</li>
+<li>$\mathbf{H}$：Hadamard矩阵（或DCT、FFT）</li>
+<li>$\mathbf{P}$：稀疏采样矩阵</li>
+</ul>
+<p>计算复杂度：$O(d \log d)$ vs 朴素的 $O(dk)$</p>
+<p><strong>算法直觉</strong>：</p>
+<ol>
+<li><strong>预处理（$\mathbf{H}\mathbf{D}$）</strong>：将能量均匀分散到所有坐标</li>
+<li><strong>采样（$\mathbf{P}$）</strong>：随机选择 $k$ 个坐标</li>
+<li><strong>理论基础</strong>：预处理后的向量接近各向同性</li>
+</ol>
+<p><strong>实现考虑</strong>：</p>
+<ul>
+<li>当 $k &lt; d/\log d$ 时，快速JL比直接投影更快</li>
+<li>Hadamard变换需要 $d$ 是2的幂（可通过padding解决）</li>
+<li>可以用DCT或其他正交变换替代Hadamard</li>
+</ul>
+<p>实际优化：</p>
+<ul>
+<li>使用FFTW或类似库实现快速变换</li>
+<li>预计算Hadamard矩阵的位反转排列</li>
+<li>流式处理大规模数据避免内存瓶颈</li>
+</ul>
+<p><strong>子采样随机Hadamard变换（SRHT）</strong>：
+更实用的变体，结合了速度和理论保证：
+$$\mathbf{S} = \sqrt{d/k} \cdot \mathbf{R} \mathbf{H} \mathbf{D}$$
+其中 $\mathbf{R}$ 是随机选择 $k$ 行的限制矩阵。</p>
+<p>关键改进：</p>
+<ul>
+<li>避免了完整的 $\mathbf{P}$ 矩阵</li>
+<li>更好的缓存局部性</li>
+<li>易于并行化</li>
+</ul>
+<p><strong>SRHT的误差分析</strong>：
+Tropp (2011) 证明了更紧的界限：
+$$\Pr[|\mathbf{S}\mathbf{x}|^2 \in (1\pm\epsilon)|\mathbf{x}|^2] \geq 1 - \delta$$
+当 $k = O(\epsilon^{-2}(\log(1/\delta) + \log(1/\epsilon)))$ 时成立。</p>
+<p><strong>实用变体和扩展</strong>：</p>
+<ol>
+<li>
+<p><strong>分块SRHT</strong>：
+   对于超大规模数据，分块处理：
+   <code>将数据分成大小为 B 的块
+   对每块应用SRHT
+   组合结果</code>
+   优势：内存效率，可并行，支持流式处理</p>
+</li>
+<li>
+<p><strong>稀疏输入的优化</strong>：
+   当输入稀疏时，可以优化SRHT：</p>
+</li>
+</ol>
+<ul>
+<li>只对非零坐标应用符号翻转</li>
+<li>使用稀疏FFT算法</li>
+<li>复杂度：$O(nnz(x) \log d + k)$</li>
+</ul>
+<ol start="3">
+<li><strong>混合方法</strong>：
+   结合不同投影的优点：</li>
+</ol>
+<ul>
+<li>对密集部分使用SRHT</li>
+<li>对稀疏部分使用稀疏投影</li>
+<li>自适应选择最优方法</li>
+</ul>
+<h3 id="613">6.1.3 数据相关的优化</h3>
+<p><strong>主成分分析引导的投影</strong>：</p>
+<ol>
+<li>计算数据的主要方向</li>
+<li>在正交补空间中应用JL</li>
+<li>组合两个子空间的投影</li>
+</ol>
+<p>具体算法：</p>
+<div class="codehilite"><pre><span></span><code>输入：数据矩阵 A ∈ ℝ^{n×d}, 目标维度 k, 能量阈值 τ
+1. 计算前 r 个主成分 U_r，使得保留 τ 比例的能量
+2. 投影到正交补：A_⊥ = A - A U_r U_r^T
+3. 对 A_⊥ 应用维度 (k-r) 的JL变换：B_⊥ = S A_⊥
+4. 最终投影：[U_r^T A; B_⊥]
+</code></pre></div>
+
+<p>理论保证：如果原始数据有快速谱衰减，此方法可以显著减少所需维度。</p>
+<p><strong>理论分析的深化</strong>：</p>
+<p>设 $\sigma_1 \geq \sigma_2 \geq ... \geq \sigma_d$ 是数据矩阵 $\mathbf{A}$ 的奇异值。</p>
+<ol>
+<li><strong>最优性保证</strong>：
+   对于秩为 $r$ 的矩阵加噪声模型 $\mathbf{A} = \mathbf{L} + \mathbf{E}$，其中 $rank(\mathbf{L}) = r$：</li>
+</ol>
+<ul>
+<li>PCA部分完美保留 $\mathbf{L}$ 的信息</li>
+<li>JL部分以高概率保留 $\mathbf{E}$ 的几何结构</li>
+<li>总体误差：$|\mathbf{A} - \tilde{\mathbf{A}}|_F \leq (1+\epsilon)|\mathbf{E}|_F$</li>
+</ul>
+<ol start="2">
+<li>
+<p><strong>维度节省分析</strong>：
+   - 标准JL需要：$k = O(\log n / \epsilon^2)$
+   - PCA引导需要：$k = r + O(\log n / \epsilon^2) \cdot \frac{\sum_{i&gt;r} \sigma_i^2}{\sum_{i=1}^d \sigma_i^2}$
+   - 当谱快速衰减时，节省显著</p>
+</li>
+<li>
+<p><strong>实践指导</strong>：
+   - 当 $\sigma_r / \sigma_1 &lt; 0.1$ 时，选择前 $r$ 个主成分
+   - 保留能量比例 $\tau$ 通常选择 0.95 或 0.99
+   - 对剩余部分的投影维度可以相应减少</p>
+</li>
+</ol>
+<p><strong>自适应目标维度选择</strong>：</p>
+<ul>
+<li>在线估计有效秩：$r_{eff} = |\mathbf{A}|_F^2 / |\mathbf{A}|_2^2$</li>
+<li>基于谱衰减调整投影维度</li>
+<li>利用矩阵相干性降低采样复杂度</li>
+</ul>
+<p><strong>详细的自适应算法</strong>：</p>
+<div class="codehilite"><pre><span></span><code>算法：自适应维度选择
+输入：数据流 {x_t}, 目标精度 ε, 初始维度 k_0
+输出：动态调整的投影维度 k_t
+
+1. 初始化：
+   <span class="k">-</span> 维护两个sketch: S_k 和 S_{2k}
+   <span class="k">-</span> 误差估计器 E = 0
+
+2. 对每批数据：
+   a. 更新两个sketch
+   b. 计算误差估计：
+      E_t = ||S_{2k}(X) - upsample(S_k(X))||_F / ||S_{2k}(X)||_F
+   c. 如果 E_t &gt; ε:
+      <span class="k">-</span> k ← 2k
+      <span class="k">-</span> 重新初始化S_k, S_{2k}
+   d. 如果连续T批 E_t &lt; ε/2:
+      <span class="k">-</span> k ← max(k/2, k_min)
+
+3. 返回当前维度k
+</code></pre></div>
+
+<p><strong>谱自适应随机投影</strong>：
+根据数据的谱特性动态调整投影：</p>
+<ol>
+<li><strong>快速谱估计</strong>：使用随机化幂法估计前几个特征值
+$$\lambda_i \approx |\mathbf{A}\mathbf{v}_i|^2 / |\mathbf{v}_i|^2$$
+其中 $\mathbf{v}_i$ 是随机向量经过若干次幂迭代后的结果</li>
+</ol>
+<p><strong>算法细节</strong>：
+   ```
+   function estimate_spectrum(A, r, q):
+       // r: 估计的特征值数量
+       // q: 幂迭代次数（通常q=1或2足够）
+       Ω = randn(d, r+p)  // p是过采样参数
+       Y = A^T A Ω
+       for j in 1:q:
+           Y = A^T A Y
+           Y = qr(Y).Q  // 正交化防止数值问题</p>
+<div class="codehilite"><pre><span></span><code><span class="w">   </span><span class="nv">B</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">A</span><span class="w"> </span><span class="nv">Y</span>
+<span class="w">   </span>[<span class="nv">U</span>,<span class="w"> </span>Σ,<span class="w"> </span><span class="o">~</span>]<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">svd</span><span class="ss">(</span><span class="nv">B</span><span class="ss">)</span>
+<span class="w">   </span>λ<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">diag</span><span class="ss">(</span>Σ<span class="ss">)</span><span class="o">^</span><span class="mi">2</span>
+<span class="w">   </span><span class="k">return</span><span class="w"> </span>λ[<span class="mi">1</span>:<span class="nv">r</span>]
+</code></pre></div>
+
+<p>```</p>
+<ol start="2">
+<li><strong>维度选择准则</strong>：
+   - 保留 $(1-\delta)$ 能量：$k = \min{j: \sum_{i=1}^j \lambda_i \geq (1-\delta)\sum_i \lambda_i}$
+   - 相对误差控制：$k = \min{j: \lambda_{j+1} \leq \epsilon \lambda_1}$</li>
+</ol>
+<p><strong>实用建议</strong>：</p>
+<ul>
+<li>对于机器学习任务，$\delta = 0.01$ 通常足够</li>
+<li>对于数值计算，可能需要 $\delta = 0.001$ 或更小</li>
+<li>考虑任务特定的误差容忍度</li>
+</ul>
+<ol start="3">
+<li><strong>非均匀采样</strong>：根据杠杆分数（leverage scores）采样
+$$\ell_i = \mathbf{u}_i^T (\mathbf{U}\mathbf{\Lambda}\mathbf{U}^T)^+ \mathbf{u}_i$$
+其中 $\mathbf{u}_i$ 是第 $i$ 行，可以高效近似计算</li>
+</ol>
+<p><strong>杠杆分数的意义</strong>：</p>
+<ul>
+<li>衡量每行对矩阵整体结构的"重要性"</li>
+<li>高杠杆分数的行需要更高的采样概率</li>
+<li>与矩阵的条件数和相干性相关</li>
+</ul>
+<p><strong>高级优化技术</strong>：</p>
+<ol>
+<li><strong>多尺度投影</strong>：
+   ```
+   构建投影层次：
+   Level 0: 保留所有主成分（前r个）
+   Level 1: 中等压缩（k = 2r）
+   Level 2: 高度压缩（k = r + O(log n)）</li>
+</ol>
+<p>根据查询需求选择合适级别
+   ```</p>
+<ol start="2">
+<li><strong>流形感知投影</strong>：
+   当数据位于低维流形时：</li>
+</ol>
+<ul>
+<li>使用局部线性嵌入（LLE）或Isomap识别流形结构</li>
+<li>在切空间中应用JL投影</li>
+<li>保持局部几何性质</li>
+</ul>
+<ol start="3">
+<li><strong>任务特定优化</strong>：
+   - <strong>分类任务</strong>：保留类间差异最大的方向（LDA引导）
+   - <strong>聚类任务</strong>：保留聚类结构的投影（谱聚类引导）
+   - <strong>回归任务</strong>：保留与目标变量相关性高的方向</li>
+</ol>
+<p><strong>实验验证的要点</strong>：</p>
+<ol>
+<li>
+<p><strong>基准测试设置</strong>：
+   - 合成数据：控制秩、噪声水平、相干性
+   - 真实数据：图像（MNIST, CIFAR）、文本（20NewsGroups）、基因组数据
+   - 评估指标：距离保持、下游任务性能、计算时间</p>
+</li>
+<li>
+<p><strong>性能曲线</strong>：
+   - 投影维度 vs 重构误差
+   - 投影维度 vs 任务精度
+   - 数据规模 vs 计算时间</p>
+</li>
+<li>
+<p><strong>鲁棒性分析</strong>：
+   - 对噪声的敏感性
+   - 对异常值的处理
+   - 对分布漂移的适应性</p>
+</li>
+</ol>
+<h3 id="614">6.1.4 实用技巧与加速</h3>
+<p><strong>分块计算策略</strong>：</p>
+<div class="codehilite"><pre><span></span><code>将大矩阵A分块为[A₁ A₂ ... Aₘ]
+分别计算SA₁, SA₂, ..., SAₘ
+利用线性性质组合结果
+</code></pre></div>
+
+<p>详细实现考虑：</p>
+<ol>
+<li>
+<p><strong>块大小选择</strong>：平衡内存带宽和计算强度
+   - CPU：块大小 ≈ L3 cache大小 / (sizeof(float) × k)
+   - GPU：块大小 ≈ 共享内存大小 / (sizeof(float) × k)</p>
+</li>
+<li>
+<p><strong>流水线处理</strong>：
+   - 读取块 i+1 的同时计算块 i 的投影
+   - 使用双缓冲减少内存等待</p>
+</li>
+<li>
+<p><strong>压缩中间结果</strong>：
+   - 对每个 $\mathbf{S}\mathbf{A}_i$ 进行在线聚合
+   - 避免存储所有中间结果</p>
+</li>
+</ol>
+<p><strong>GPU加速考虑</strong>：</p>
+<ul>
+<li>使用结构化变换（如SRHT）以利用FFT</li>
+<li>批量矩阵乘法的并行化</li>
+<li>混合精度计算的误差分析</li>
+</ul>
+<p>GPU优化细节：</p>
+<ol>
+<li>
+<p><strong>内核融合</strong>：将随机数生成和矩阵乘法融合
+   <code>// 伪代码
+   __global__ void fused_random_projection(A, S_seed, output) {
+     // 在线生成S的一行
+     generate_random_row(S_row, S_seed, row_id);
+     // 立即计算内积
+     output[row_id] = dot_product(S_row, A[col_id]);
+   }</code></p>
+</li>
+<li>
+<p><strong>Tensor Core利用</strong>（NVIDIA GPU）：
+   - 使用半精度进行主要计算
+   - 关键累加使用单精度
+   - 误差界限：$|\mathbf{S}_{fp16}\mathbf{x} - \mathbf{S}_{fp32}\mathbf{x}| \leq O(\sqrt{k}u)|\mathbf{x}|$
+   其中 $u$ 是机器精度</p>
+</li>
+<li>
+<p><strong>多流并发</strong>：
+   - 不同数据块在不同CUDA流上处理
+   - 重叠计算和数据传输</p>
+</li>
+</ol>
+<h3 id="615">6.1.5 误差分析的精细化</h3>
+<p><strong>尾部概率的改进界限</strong>：
+$$\Pr[||\mathbf{S}\mathbf{x}|^2 - |\mathbf{x}|^2| &gt; \epsilon|\mathbf{x}|^2] \leq 2\exp\left(-\frac{k\epsilon^2}{4-2\epsilon/3}\right)$$
+更紧的界限（使用矩阵Bernstein不等式）：
+$$\Pr[||\mathbf{S}\mathbf{x}|^2 - |\mathbf{x}|^2| &gt; \epsilon|\mathbf{x}|^2] \leq 2\exp\left(-\frac{k\epsilon^2/2}{1+\epsilon/3}\right)$$
+这在 $\epsilon$ 较小时给出更好的常数。</p>
+<p><strong>有限精度效应</strong>：</p>
+<ul>
+<li>浮点运算的误差累积</li>
+<li>条件数对精度的影响</li>
+<li>数值稳定的正交化技术</li>
+</ul>
+<p>详细分析：</p>
+<ol>
+<li>
+<p><strong>误差传播模型</strong>：
+   设浮点运算误差为 $u$（通常 $u \approx 10^{-7}$ for float32），则：
+$$|\tilde{\mathbf{S}}\mathbf{x} - \mathbf{S}\mathbf{x}| \leq C\sqrt{kd}u|\mathbf{S}||\mathbf{x}|$$
+其中 $C$ 是与具体实现相关的常数（通常 $C \in [1, 10]$）。</p>
+</li>
+<li>
+<p><strong>条件数的影响</strong>：
+   - 对于结构化矩阵（如SRHT），条件数有界：$\kappa(\mathbf{S}) = O(\sqrt{d/k})$ w.h.p.
+   - 对于高斯随机矩阵，$\kappa(\mathbf{S}) = O(\sqrt{d/k} + \sqrt{k/d})$ w.h.p.</p>
+</li>
+<li>
+<p><strong>稳定性增强技术</strong>：
+   - <strong>Kahan求和</strong>：减少累加误差
+   - <strong>分块正交化</strong>：避免大规模Gram-Schmidt的数值问题
+   - <strong>迭代精化</strong>：对关键计算使用高精度验证</p>
+</li>
+</ol>
+<p><strong>实用误差估计</strong>：
+给定目标精度 $\epsilon_{target}$，选择：</p>
+<ul>
+<li>投影维度：$k \geq C_1 \log(n/\delta) / \epsilon_{target}^2$</li>
+<li>数值精度：确保 $\sqrt{kd}u \ll \epsilon_{target}$</li>
+<li>其中 $\delta$ 是失败概率，$C_1 \approx 8$ 在实践中效果良好</li>
+</ul>
+<h3 id="616">6.1.6 研究前沿</h3>
+<p><strong>最优性问题</strong>：</p>
+<ul>
+<li>对于特定矩阵类，JL界限是否可以改进？</li>
+<li>数据相关的投影是否总是优于数据无关的？</li>
+</ul>
+<p>开放研究问题：</p>
+<ol>
+<li><strong>下界的紧致性</strong>：Larsen &amp; Nelson (2017) 证明了 $k = \Omega(\log n / \epsilon^2)$ 的下界，但常数因子仍有改进空间</li>
+<li><strong>结构化数据的特殊界限</strong>：
+   - 稀疏向量：可否利用稀疏性降低维度？
+   - 低秩+稀疏：如何设计最优投影？</li>
+<li><strong>自适应vs非自适应</strong>：证明或反驳自适应方法的严格优越性</li>
+</ol>
+<p><strong>量子JL变换</strong>：</p>
+<ul>
+<li>利用量子叠加实现指数加速</li>
+<li>经典模拟的可能性与限制</li>
+</ul>
+<p>量子优势的潜在来源：</p>
+<ol>
+<li><strong>振幅编码</strong>：将 $d$ 维向量编码在 $\log d$ 个量子比特中</li>
+<li><strong>并行内积计算</strong>：量子叠加允许同时计算多个投影</li>
+<li><strong>测量后选择</strong>：选择性地保留好的投影结果</li>
+</ol>
+<p>挑战与机遇：</p>
+<ul>
+<li>量子噪声对JL保证的影响</li>
+<li>NISQ设备上的实现可能性</li>
+<li>经典算法借鉴量子思想（如张量网络方法）</li>
+</ul>
+<p><strong>新兴应用驱动的理论发展</strong>：</p>
+<ol>
+<li>
+<p><strong>联邦学习中的隐私保护投影</strong>：
+   - 设计满足差分隐私的JL变换
+   - 隐私-效用权衡的最优化</p>
+</li>
+<li>
+<p><strong>神经网络架构搜索</strong>：
+   - 使用JL加速架构评估
+   - 保持梯度信息的投影设计</p>
+</li>
+<li>
+<p><strong>在线决策中的维度约简</strong>：
+   - 后悔界与投影维度的关系
+   - 自适应维度选择的bandit算法</p>
+</li>
+</ol>
+<h2 id="62-countsketch">6.2 CountSketch与随机投影</h2>
+<h3 id="621-countsketch">6.2.1 CountSketch的核心思想</h3>
+<p>CountSketch通过哈希函数将高维向量映射到低维空间：</p>
+<p><strong>基本构造</strong>：</p>
+<ul>
+<li>哈希函数：$h: [d] \rightarrow [k]$</li>
+<li>符号函数：$s: [d] \rightarrow {-1, +1}$</li>
+<li>Sketch向量：$\mathbf{y}_j = \sum_{i: h(i)=j} s(i) \mathbf{x}_i$</li>
+</ul>
+<p><strong>矩阵形式</strong>：
+$$\mathbf{S} = \mathbf{\Phi} \mathbf{D}$$
+其中 $\mathbf{\Phi}$ 是采样矩阵，$\mathbf{D}$ 是随机符号对角矩阵。</p>
+<p><strong>为什么需要符号函数？</strong>
+符号函数 $s$ 的作用是打破对称性，避免系统性偏差：</p>
+<ul>
+<li>没有符号函数：哈希碰撞总是导致正向叠加</li>
+<li>有符号函数：碰撞的期望贡献为零，$\mathbb{E}[s(i)s(j)] = 0$ for $i \neq j$</li>
+</ul>
+<p><strong>与JL的关系</strong>：
+CountSketch可以看作极度稀疏的JL变换：</p>
+<ul>
+<li>JL：每个输出坐标依赖所有输入坐标</li>
+<li>CountSketch：每个输出坐标只依赖 $O(d/k)$ 个输入坐标</li>
+<li>权衡：更快的计算 vs 略差的浓度性质</li>
+</ul>
+<p><strong>理论直觉</strong>：
+考虑sketch的第 $j$ 个坐标：
+$$\mathbf{y}_j = \sum_{i: h(i)=j} s(i) \mathbf{x}_i = s(i_0)\mathbf{x}_{i_0} + \sum_{i \neq i_0, h(i)=j} s(i) \mathbf{x}_i$$
+第一项是"信号"，第二项是"噪声"。通过随机符号，噪声项的期望为零，方差与碰撞数量成正比。</p>
+<h3 id="622">6.2.2 理论保证与优化</h3>
+<p><strong>基本保证</strong>：
+$$\mathbb{E}[|\mathbf{S}\mathbf{x}|^2] = |\mathbf{x}|^2$$
+$$\text{Var}[|\mathbf{S}\mathbf{x}|^2] \leq \frac{2}{k}|\mathbf{x}|^4$$
+更精确的分析显示：
+$$\Pr[||\mathbf{S}\mathbf{x}|^2 - |\mathbf{x}|^2| &gt; \epsilon|\mathbf{x}|^2] \leq \frac{2}{k\epsilon^2}$$
+这比JL的指数界限弱，但CountSketch的计算速度快得多。</p>
+<p><strong>改进的CountSketch</strong>：</p>
+<ul>
+<li>使用多个独立哈希函数</li>
+<li>中值估计器提高鲁棒性</li>
+<li>分层哈希减少碰撞</li>
+</ul>
+<p><strong>多哈希函数设计</strong>：
+使用 $t$ 个独立的哈希函数对：$(h_1, s_1), ..., (h_t, s_t)$</p>
+<ol>
+<li>
+<p><strong>并行版本</strong>：每个哈希产生独立的sketch
+   - 优点：完全并行，理论分析简单
+   - 缺点：存储开销 $O(tk)$</p>
+</li>
+<li>
+<p><strong>特征哈希(Feature Hashing)</strong>：共享同一个输出空间
+   <code>for i in 1:d
+     for j in 1:t
+       output[h_j(i)] += s_j(i) * x[i] / sqrt(t)</code></p>
+</li>
+</ol>
+<ul>
+<li>优点：存储仅 $O(k)$</li>
+<li>缺点：哈希间可能相互干扰</li>
+</ul>
+<p><strong>中值估计的威力</strong>：
+对于 $t$ 个独立估计 $\tilde{x}_1, ..., \tilde{x}_t$：</p>
+<ul>
+<li>均值估计：$\text{Var}[\text{mean}] = O(1/tk)$</li>
+<li>中值估计：尾部概率 $\exp(-\Omega(t))$</li>
+</ul>
+<p>中值特别适合处理heavy-tailed分布或存在异常值的情况。</p>
+<h3 id="623">6.2.3 矩阵乘法的加速</h3>
+<p><strong>近似矩阵乘积</strong>：
+$$\mathbf{A}\mathbf{B} \approx (\mathbf{S}_A\mathbf{A})^T(\mathbf{S}_B\mathbf{B})$$
+复杂度：$O(nnz(\mathbf{A}) + nnz(\mathbf{B}) + k^2n)$ vs $O(n^3)$</p>
+<p><strong>误差界限</strong>：
+$$|\mathbf{A}\mathbf{B} - \tilde{\mathbf{A}}\tilde{\mathbf{B}}|_F \leq \epsilon|\mathbf{A}|_F|\mathbf{B}|_F$$
+当 $k = O(1/\epsilon^2)$ 时以高概率成立。</p>
+<p><strong>更紧的分析（Clarkson &amp; Woodruff, 2013）</strong>：
+对于秩为 $r$ 的矩阵乘积：
+$$|\mathbf{A}\mathbf{B} - \tilde{\mathbf{A}}\tilde{\mathbf{B}}|_F \leq \epsilon|\mathbf{A}|_F|\mathbf{B}|_F$$
+当 $k = O(r/\epsilon^2)$ 时成立。这表明sketch大小可以适应问题的内在维度。</p>
+<p><strong>高级技巧：TensorSketch</strong>
+对于三个或更多矩阵的乘积，使用TensorSketch避免中间展开：
+$$\mathbf{A} \otimes \mathbf{B} \approx \text{FFT}^{-1}(\text{FFT}(\mathbf{S}_A\mathbf{A}) \odot \text{FFT}(\mathbf{S}_B\mathbf{B}))$$
+优势：</p>
+<ul>
+<li>避免显式构造Kronecker积</li>
+<li>利用FFT将复杂度降至 $O(k \log k)$</li>
+<li>保持相同的理论保证</li>
+</ul>
+<p><strong>实际应用场景</strong>：</p>
+<ol>
+<li>
+<p><strong>核方法加速</strong>：
+   - 多项式核：$K(x,y) = (x^T y + c)^d$
+   - 使用TensorSketch近似高阶特征映射
+   - 复杂度从 $O(d^p)$ 降至 $O(k \log k)$</p>
+</li>
+<li>
+<p><strong>神经网络中的应用</strong>：
+   - 加速全连接层：$\mathbf{W}\mathbf{x} \approx (\mathbf{S}_W\mathbf{W})^T(\mathbf{S}_x\mathbf{x})$
+   - 注意力机制：近似 $\mathbf{Q}\mathbf{K}^T$
+   - 参数效率：存储sketch而非完整权重</p>
+</li>
+</ol>
+<h3 id="624">6.2.4 稀疏恢复与压缩感知</h3>
+<p><strong>与压缩感知的联系</strong>：</p>
+<ul>
+<li>CountSketch作为测量矩阵</li>
+<li>RIP性质的验证</li>
+<li>稀疏信号的精确恢复条件</li>
+</ul>
+<p><strong>Heavy Hitters问题</strong>：
+找出向量中最大的 $k$ 个元素</p>
+<ul>
+<li>CountSketch的自然应用</li>
+<li>误差保证：$|\mathbf{x} - \hat{\mathbf{x}}|_2 \leq \epsilon|\mathbf{x}_{-k}|_2$</li>
+</ul>
+<p><strong>CountSketch的RIP性质</strong>：
+对于 $s$-稀疏向量，CountSketch满足限制等距性质(RIP)：
+$$(1-\delta)|\mathbf{x}|_2^2 \leq |\mathbf{S}\mathbf{x}|_2^2 \leq (1+\delta)|\mathbf{x}|_2^2$$
+当 $k = O(s \log(d/s) / \delta^2)$ 时，以高概率成立。</p>
+<p><strong>稀疏恢复算法</strong>：</p>
+<ol>
+<li>
+<p><strong>CountMin-Sketch恢复</strong>：
+   <code>for each potential heavy hitter i:
+     estimate[i] = median over t sketches of:
+       sign(s_j(i)) * sketch_j[h_j(i)]</code></p>
+</li>
+<li>
+<p><strong>迭代恢复（稀疏追踪）</strong>：
+   - 识别最大坐标
+   - 从sketch中减去其贡献
+   - 重复直到恢复 $k$ 个元素</p>
+</li>
+</ol>
+<p><strong>理论保证的精细化</strong>：</p>
+<ul>
+<li>$\ell_2/\ell_2$ 保证：$|\mathbf{x} - \hat{\mathbf{x}}|_2 \leq (1+\epsilon)|\mathbf{x}_{-k}|_2$</li>
+<li>$\ell_\infty/\ell_2$ 保证：$|\mathbf{x} - \hat{\mathbf{x}}|_\infty \leq \epsilon|\mathbf{x}_{-k}|_2/\sqrt{k}$</li>
+<li>这些界限在 $k = O(\log d / \epsilon^2)$ 时成立</li>
+</ul>
+<p><strong>实际优化</strong>：</p>
+<ol>
+<li><strong>自适应阈值</strong>：动态调整heavy hitter的检测阈值</li>
+<li><strong>分层结构</strong>：使用dyadic tree处理不同尺度的元素</li>
+<li><strong>并行恢复</strong>：多个线程同时恢复不同范围的坐标</li>
+</ol>
+<h3 id="625-countsketch">6.2.5 分布式CountSketch</h3>
+<p><strong>MapReduce实现</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">Map</span><span class="o">:</span><span class="w"> </span><span class="err">对每个数据点计算局部</span><span class="n">sketch</span>
+<span class="n">Reduce</span><span class="o">:</span><span class="w"> </span><span class="err">合并相同哈希位置的值</span>
+</code></pre></div>
+
+<p><strong>通信复杂度分析</strong>：</p>
+<ul>
+<li>每个节点发送 $O(k)$ 数据</li>
+<li>总通信量：$O(pk)$，其中 $p$ 是节点数</li>
+<li>与全通信 $O(pd)$ 相比的节省</li>
+</ul>
+<p><strong>高级分布式策略</strong>：</p>
+<ol>
+<li>
+<p><strong>分层聚合</strong>：
+   <code>Level 0: 每个worker计算局部sketch
+   Level 1: 组内聚合（如机架内）
+   Level 2: 跨组聚合
+   ...
+   Level log p: 全局聚合</code>
+   优势：减少跨数据中心通信，总通信 $O(k \log p)$</p>
+</li>
+<li>
+<p><strong>异步更新</strong>：
+   - Worker推送增量更新而非完整sketch
+   - 参数服务器维护全局sketch
+   - 容忍有界的延迟：$|\mathbf{S}_{delay} - \mathbf{S}_{current}| \leq \tau$</p>
+</li>
+<li>
+<p><strong>压缩通信</strong>：
+   - 只发送sketch的非零项
+   - 使用差分编码：$\Delta\mathbf{S}_t = \mathbf{S}_t - \mathbf{S}_{t-1}$
+   - 量化：将浮点数映射到有限精度</p>
+</li>
+</ol>
+<p><strong>容错性设计</strong>：</p>
+<ul>
+<li><strong>冗余计算</strong>：每个数据分片由多个节点处理</li>
+<li><strong>Checkpoint机制</strong>：周期性保存sketch状态</li>
+<li><strong>拜占庭鲁棒性</strong>：使用中值而非均值聚合</li>
+</ul>
+<p><strong>理论分析</strong>：
+在异步设置下，如果延迟有界 $\tau$，则误差界变为：
+$$|\mathbf{x} - \hat{\mathbf{x}}|_2 \leq \epsilon|\mathbf{x}_{-k}|_2 + O(\tau/\sqrt{k})$$
+这表明适度的异步不会显著损害精度。</p>
+<h3 id="626">6.2.6 实际应用中的技巧</h3>
+<p><strong>动态更新</strong>：</p>
+<ul>
+<li>流式数据的增量更新</li>
+<li>滑动窗口的高效维护</li>
+<li>时间衰减的sketch</li>
+</ul>
+<p><strong>滑动窗口CountSketch</strong>：
+维护最近 $W$ 个时间步的sketch：</p>
+<div class="codehilite"><pre><span></span><code>循环缓冲区存储每个时间步的增量
+更新时：
+  - 添加新时间步的贡献
+  - 减去最旧时间步的贡献
+  - 更新指针
+</code></pre></div>
+
+<p><strong>指数衰减变体</strong>：
+$$\mathbf{S}_t = \alpha \mathbf{S}_{t-1} + \mathbf{S}(\mathbf{x}_t)$$
+其中 $\alpha \in (0,1)$ 控制历史数据的衰减速度。</p>
+<p><strong>内存布局优化</strong>：</p>
+<ul>
+<li>Cache友好的哈希函数设计</li>
+<li>SIMD加速的向量化实现</li>
+<li>避免false sharing的数据结构</li>
+</ul>
+<p><strong>具体优化技术</strong>：</p>
+<ol>
+<li>
+<p><strong>哈希函数选择</strong>：
+   - MurmurHash3：快速且分布均匀
+   - TabHash：使用查表避免乘法
+   - 2-universal family：理论保证+实际效率</p>
+</li>
+<li>
+<p><strong>SIMD实现</strong>：
+   <code>cpp
+   // 使用AVX2处理8个元素
+   __m256 signs = _mm256_load_ps(sign_table + i);
+   __m256 values = _mm256_load_ps(input + i);
+   __m256 products = _mm256_mul_ps(signs, values);
+   // 累加到相应的sketch位置</code></p>
+</li>
+<li>
+<p><strong>内存对齐</strong>：
+   - Sketch数组按cache line (64字节)对齐
+   - 使用padding避免false sharing
+   - 预取(prefetch)即将访问的数据</p>
+</li>
+</ol>
+<p><strong>性能调优清单</strong>：</p>
+<ul>
+<li>[ ] 选择合适的哈希函数族</li>
+<li>[ ] 实现SIMD加速版本</li>
+<li>[ ] 优化内存访问模式</li>
+<li>[ ] 使用无锁数据结构（如可能）</li>
+<li>[ ] Profile热点并针对性优化</li>
+</ul>
+<h2 id="63-frequent-directions">6.3 Frequent Directions算法</h2>
+<h3 id="631">6.3.1 算法动机与设计</h3>
+<p>Frequent Directions (FD) 是矩阵sketching的"最优"算法，类似于Misra-Gries算法在频繁项问题中的地位。</p>
+<p><strong>核心思想</strong>：
+维护一个低秩近似 $\mathbf{B} \in \mathbb{R}^{k \times d}$，使得：
+$$\mathbf{B}^T\mathbf{B} \approx \mathbf{A}^T\mathbf{A}$$
+<strong>算法流程</strong>：</p>
+<ol>
+<li>初始化：$\mathbf{B} = \mathbf{0}$</li>
+<li>对每个新行 $\mathbf{a}_t$：
+   - 添加到 $\mathbf{B}$：$\mathbf{B} \leftarrow [\mathbf{B}; \mathbf{a}_t]$
+   - 计算SVD：$\mathbf{B} = \mathbf{U}\mathbf{\Sigma}\mathbf{V}^T$
+   - 收缩：$\sigma_i \leftarrow \sqrt{\max(0, \sigma_i^2 - \sigma_k^2)}$
+   - 保留前 $k-1$ 行</li>
+</ol>
+<h3 id="632">6.3.2 理论性质</h3>
+<p><strong>谱范数保证</strong>：
+$$|\mathbf{A}^T\mathbf{A} - \mathbf{B}^T\mathbf{B}|_2 \leq \frac{1}{k}|\mathbf{A} - \mathbf{A}_k|_F^2$$
+其中 $\mathbf{A}_k$ 是 $\mathbf{A}$ 的最佳秩-$k$ 近似。</p>
+<p><strong>协方差估计</strong>：
+$$\mathbf{0} \preceq \mathbf{A}^T\mathbf{A} - \mathbf{B}^T\mathbf{B} \preceq \frac{1}{k}|\mathbf{A}|_F^2 \mathbf{I}$$
+这保证了FD给出的是协方差矩阵的欠估计。</p>
+<h3 id="633">6.3.3 快速变体</h3>
+<p><strong>Fast Frequent Directions</strong>：</p>
+<ul>
+<li>延迟SVD计算</li>
+<li>批量处理多行</li>
+<li>利用QR分解代替完整SVD</li>
+</ul>
+<p><strong>随机化加速</strong>：</p>
+<div class="codehilite"><pre><span></span><code>使用随机投影近似SVD
+误差仍然有界，但常数略大
+计算复杂度从O(dk²)降至O(dk log k)
+</code></pre></div>
+
+<h3 id="634">6.3.4 与其他方法的比较</h3>
+<p><strong>vs 随机采样</strong>：</p>
+<ul>
+<li>FD：确定性保证，空间 $O(kd)$</li>
+<li>采样：概率保证，可能需要 $O(k^2d)$ 空间</li>
+</ul>
+<p><strong>vs 随机投影</strong>：</p>
+<ul>
+<li>FD：保持正定性，适合协方差估计</li>
+<li>RP：更快但可能产生负特征值</li>
+</ul>
+<h3 id="635">6.3.5 应用场景</h3>
+<p><strong>主成分分析</strong>：</p>
+<ul>
+<li>流式PCA的最优算法</li>
+<li>在线特征值跟踪</li>
+<li>异常检测中的应用</li>
+</ul>
+<p><strong>矩阵补全预处理</strong>：</p>
+<ul>
+<li>快速估计矩阵的有效秩</li>
+<li>为迭代算法提供初始化</li>
+<li>加速收敛的理论保证</li>
+</ul>
+<h3 id="636">6.3.6 扩展与变体</h3>
+<p><strong>加权Frequent Directions</strong>：
+处理重要性不同的数据点
+$$\text{收缩步骤：} \sigma_i \leftarrow \sqrt{\max(0, \sigma_i^2 - w_t\sigma_k^2)}$$
+<strong>分布式FD</strong>：</p>
+<ul>
+<li>每个节点维护局部sketch</li>
+<li>周期性合并与收缩</li>
+<li>通信与精度的权衡</li>
+</ul>
+<p><strong>时间衰减FD</strong>：
+对历史数据施加指数衰减</p>
+<ul>
+<li>适应概念漂移</li>
+<li>有界内存下的无限流处理</li>
+</ul>
+<h2 id="64">6.4 在神经网络压缩中的应用</h2>
+<h3 id="641">6.4.1 权重矩阵的低秩近似</h3>
+<p><strong>基本思路</strong>：
+将权重矩阵 $\mathbf{W} \in \mathbb{R}^{m \times n}$ 分解为：
+$$\mathbf{W} \approx \mathbf{U}\mathbf{V}^T$$
+其中 $\mathbf{U} \in \mathbb{R}^{m \times r}$，$\mathbf{V} \in \mathbb{R}^{n \times r}$，$r \ll \min(m,n)$。</p>
+<p><strong>Sketching加速分解</strong>：</p>
+<ol>
+<li>计算sketch：$\mathbf{S}_1\mathbf{W}$ 和 $\mathbf{W}\mathbf{S}_2^T$</li>
+<li>在sketch上进行SVD</li>
+<li>恢复原始空间的因子</li>
+</ol>
+<h3 id="642">6.4.2 激活值压缩</h3>
+<p><strong>动态范围问题</strong>：</p>
+<ul>
+<li>激活值的分布随层深度变化很大</li>
+<li>需要自适应的quantization策略</li>
+<li>Sketching可以快速估计分布参数</li>
+</ul>
+<p><strong>在线激活压缩</strong>：</p>
+<div class="codehilite"><pre><span></span><code>维护激活值的Frequent Directions sketch
+动态调整量化阈值
+实现通信-精度的最优权衡
+</code></pre></div>
+
+<h3 id="643">6.4.3 梯度压缩与通信</h3>
+<p><strong>分布式训练中的挑战</strong>：</p>
+<ul>
+<li>梯度通信是主要瓶颈</li>
+<li>需要保持收敛性保证</li>
+<li>处理非凸优化的特殊性</li>
+</ul>
+<p><strong>Sketched梯度下降</strong>：
+$$\mathbf{g}_t^{(i)} = \nabla f_i(\mathbf{w}_t)$$
+$$\tilde{\mathbf{g}}_t = \frac{1}{n}\sum_{i=1}^n \mathbf{S}^T\mathbf{S}\mathbf{g}_t^{(i)}$$
+收敛保证需要仔细的误差分析。</p>
+<h3 id="644">6.4.4 注意力机制的加速</h3>
+<p><strong>自注意力的计算瓶颈</strong>：
+$$\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d}}\right)\mathbf{V}$$
+复杂度：$O(n^2d)$，其中 $n$ 是序列长度。</p>
+<p><strong>线性注意力via Sketching</strong>：</p>
+<ul>
+<li>使用随机特征近似softmax</li>
+<li>CountSketch加速矩阵乘法</li>
+<li>保持端到端的可微性</li>
+</ul>
+<h3 id="645">6.4.5 模型蒸馏中的应用</h3>
+<p><strong>知识转移的新视角</strong>：</p>
+<ul>
+<li>Teacher网络的激活模式sketching</li>
+<li>保留关键的统计信息</li>
+<li>指导Student网络的训练</li>
+</ul>
+<p><strong>Sketched蒸馏损失</strong>：
+$$\mathcal{L} = |\mathbf{S}(\mathbf{A}_{teacher}) - \mathbf{S}(\mathbf{A}_{student})|_F^2$$
+其中 $\mathbf{S}$ 是适当选择的sketching算子。</p>
+<h3 id="646">6.4.6 未来研究方向</h3>
+<p><strong>硬件协同设计</strong>：</p>
+<ul>
+<li>专门的sketching加速器</li>
+<li>与稀疏计算的结合</li>
+<li>能量效率优化</li>
+</ul>
+<p><strong>理论突破需求</strong>：</p>
+<ul>
+<li>非线性网络的sketching理论</li>
+<li>端到端的压缩率保证</li>
+<li>与其他压缩技术的最优组合</li>
+</ul>
+<h2 id="_3">本章小结</h2>
+<p>矩阵sketching技术为大规模计算提供了强大的工具。关键要点：</p>
+<ol>
+<li><strong>JL引理的实用化</strong>需要在理论保证和实际效率间平衡</li>
+<li><strong>CountSketch</strong>提供了简单高效的随机化方法</li>
+<li><strong>Frequent Directions</strong>给出了最优的确定性保证</li>
+<li><strong>神经网络压缩</strong>是sketching技术的重要应用领域</li>
+</ol>
+<p>核心见解：</p>
+<ul>
+<li>Sketching不仅是降维，更是信息的智能压缩</li>
+<li>不同sketching方法适用于不同的问题结构</li>
+<li>理论分析指导实践，实践需求推动理论发展</li>
+</ul>
+<h2 id="gotchas">常见陷阱与错误 (Gotchas)</h2>
+<ol>
+<li>
+<p><strong>盲目追求低维</strong>
+   - 错误：总是使用理论最小维度
+   - 正确：根据实际精度需求调整，考虑常数因子</p>
+</li>
+<li>
+<p><strong>忽视数值稳定性</strong>
+   - 错误：直接实现教科书算法
+   - 正确：使用数值稳定的变体，如QR-based FD</p>
+</li>
+<li>
+<p><strong>不当的性能评估</strong>
+   - 错误：只看压缩率
+   - 正确：综合考虑精度、速度、内存使用</p>
+</li>
+<li>
+<p><strong>假设独立同分布</strong>
+   - 错误：对所有数据使用相同的sketch
+   - 正确：考虑数据的时变性和异质性</p>
+</li>
+<li>
+<p><strong>忽略硬件特性</strong>
+   - 错误：只考虑算法复杂度
+   - 正确：优化内存访问模式，利用并行性</p>
+</li>
+</ol>
+<h2 id="_4">最佳实践检查清单</h2>
+<h3 id="_5">算法选择</h3>
+<ul>
+<li>[ ] 分析数据特性（稀疏性、谱分布、动态范围）</li>
+<li>[ ] 明确精度要求与资源限制</li>
+<li>[ ] 考虑是否需要确定性保证</li>
+<li>[ ] 评估更新频率与批处理可能性</li>
+</ul>
+<h3 id="_6">实现优化</h3>
+<ul>
+<li>[ ] 使用高效的线性代数库（BLAS, LAPACK）</li>
+<li>[ ] 实现cache-friendly的数据布局</li>
+<li>[ ] 利用SIMD指令和GPU加速</li>
+<li>[ ] 添加数值稳定性检查</li>
+</ul>
+<h3 id="_7">参数调优</h3>
+<ul>
+<li>[ ] 通过小规模实验确定sketch大小</li>
+<li>[ ] 使用交叉验证选择超参数</li>
+<li>[ ] 监控实际误差vs理论界限</li>
+<li>[ ] 准备自适应调整机制</li>
+</ul>
+<h3 id="_8">系统集成</h3>
+<ul>
+<li>[ ] 设计清晰的API接口</li>
+<li>[ ] 提供增量更新能力</li>
+<li>[ ] 实现checkpoint和恢复机制</li>
+<li>[ ] 添加性能监控和日志</li>
+</ul>
+<h2 id="_9">练习题</h2>
+<h3 id="_10">基础题</h3>
+<p><strong>习题6.1</strong> 证明对于高斯随机投影矩阵 $\mathbf{S} \in \mathbb{R}^{k \times d}$，其中 $S_{ij} \sim \mathcal{N}(0, 1/k)$，有：
+$$\mathbb{E}[|\mathbf{S}\mathbf{x}|^2] = |\mathbf{x}|^2$$
+<em>Hint</em>: 利用高斯随机变量的性质和独立性。</p>
+<details>
+<summary>答案</summary>
+<p>设 $\mathbf{y} = \mathbf{S}\mathbf{x}$，则 $y_i = \sum_{j=1}^d S_{ij}x_j$。</p>
+<p>由于 $S_{ij} \sim \mathcal{N}(0, 1/k)$ 且相互独立：
+$$\mathbb{E}[y_i^2] = \mathbb{E}\left[\left(\sum_{j=1}^d S_{ij}x_j\right)^2\right]$$
+展开并利用独立性：
+$$= \sum_{j=1}^d x_j^2 \mathbb{E}[S_{ij}^2] = \sum_{j=1}^d x_j^2 \cdot \frac{1}{k} = \frac{|\mathbf{x}|^2}{k}$$
+因此：
+$$\mathbb{E}[|\mathbf{y}|^2] = \sum_{i=1}^k \mathbb{E}[y_i^2] = k \cdot \frac{|\mathbf{x}|^2}{k} = |\mathbf{x}|^2$$</p>
+</details>
+<p><strong>习题6.2</strong> 对于CountSketch矩阵，计算 $\text{Var}[(\mathbf{S}\mathbf{x})_i]$ 并说明如何通过多个独立sketch降低方差。</p>
+<p><em>Hint</em>: 考虑哈希碰撞的影响。</p>
+<details>
+<summary>答案</summary>
+<p>设 $h: [d] \rightarrow [k]$ 为哈希函数，$s: [d] \rightarrow {-1,+1}$ 为符号函数。</p>
+<p>则 $(\mathbf{S}\mathbf{x})_i = \sum_{j: h(j)=i} s(j)x_j$。</p>
+<p>对于均匀随机哈希，$\Pr[h(j)=i] = 1/k$。</p>
+<p>期望：$\mathbb{E}[(\mathbf{S}\mathbf{x})_i] = 0$（由于随机符号）</p>
+<p>方差：
+$$\text{Var}[(\mathbf{S}\mathbf{x})_i] = \mathbb{E}[(\mathbf{S}\mathbf{x})_i^2] = \sum_{j=1}^d \frac{1}{k}x_j^2 = \frac{|\mathbf{x}|^2}{k}$$</p>
+<p>使用 $t$ 个独立sketch取平均可将方差降至 $\frac{|\mathbf{x}|^2}{kt}$。</p>
+</details>
+<p><strong>习题6.3</strong> 实现Frequent Directions算法的一个简化版本，处理批量更新而非逐行更新。分析批大小对精度和效率的影响。</p>
+<p><em>Hint</em>: 使用QR分解代替SVD可以提高效率。</p>
+<details>
+<summary>答案</summary>
+<p>批量FD算法：</p>
+<ol>
+<li>收集 $b$ 行形成批次矩阵 $\mathbf{A}_{batch}$</li>
+<li>组合：$\mathbf{B}_{new} = [\mathbf{B}; \mathbf{A}_{batch}]$</li>
+<li>QR分解：$\mathbf{B}_{new} = \mathbf{Q}\mathbf{R}$</li>
+<li>对 $\mathbf{R}$ 进行SVD：$\mathbf{R} = \mathbf{U}_R\mathbf{\Sigma}\mathbf{V}^T$</li>
+<li>收缩和截断</li>
+</ol>
+<p>批大小影响：</p>
+<ul>
+<li>大批次：更好的计算效率（矩阵乘法）</li>
+<li>小批次：更好的空间效率和更新频率</li>
+<li>最优批大小：$b = \Theta(\sqrt{k})$ 平衡计算和精度</li>
+</ul>
+</details>
+<h3 id="_11">挑战题</h3>
+<p><strong>习题6.4</strong> 设计一个自适应sketching算法，能够根据数据流的特性动态调整sketch大小。给出理论保证。</p>
+<p><em>Hint</em>: 考虑使用doubling技巧和误差估计。</p>
+<details>
+<summary>答案</summary>
+<p>自适应算法框架：</p>
+<ol>
+<li>
+<p><strong>误差估计器</strong>：维护两个不同大小的sketch ($k$ 和 $2k$)
+   - 若两者差异大，说明当前 $k$ 不够</p>
+</li>
+<li>
+<p><strong>Doubling策略</strong>：
+   - 初始 $k_0 = O(\log n)$
+   - 当误差超过阈值时，$k \leftarrow 2k$
+   - 使用旧sketch初始化新sketch</p>
+</li>
+<li>
+<p><strong>理论保证</strong>：
+   - 总sketch大小：$O(k^* \log(d/k^*))$
+   - 其中 $k^*$ 是达到目标精度的最小维度
+   - 更新复杂度：amortized $O(d)$</p>
+</li>
+<li>
+<p><strong>实现技巧</strong>：
+   - 使用环形缓冲区避免数据复制
+   - 增量式SVD更新
+   - 并行维护多个分辨率的sketch</p>
+</li>
+</ol>
+</details>
+<p><strong>习题6.5</strong> 分析在非均匀数据分布下，不同sketching方法的表现。特别考虑heavy-tailed分布。</p>
+<p><em>Hint</em>: 考虑使用robust统计量和重要性采样。</p>
+<details>
+<summary>答案</summary>
+<p>Heavy-tailed分布的挑战：</p>
+<ul>
+<li>少数大值主导 $\ell_2$ 范数</li>
+<li>标准JL界限可能过于保守</li>
+</ul>
+<p>解决方案：</p>
+<ol>
+<li>
+<p><strong>分层sketching</strong>：
+   - 将数据按大小分组
+   - 对每组使用不同的sketch大小
+   - 理论：保持相对误差而非绝对误差</p>
+</li>
+<li>
+<p><strong>Robust sketching</strong>：
+   - 使用 $\ell_p$ 范数，$p &lt; 2$
+   - CountSketch的中值估计
+   - 理论：尾部概率随 $p$ 改善</p>
+</li>
+<li>
+<p><strong>重要性采样sketch</strong>：
+   - 采样概率 $\propto |x_i|^p$，$p \in [0,2]$
+   - 需要两遍扫描或在线估计
+   - 理论：方差最优for给定内存</p>
+</li>
+</ol>
+<p>比较：</p>
+<ul>
+<li>Gaussian sketch: 对outlier敏感</li>
+<li>CountSketch: 自然的robustness</li>
+<li>FD: 保留主要模式，忽略尾部</li>
+</ul>
+</details>
+<p><strong>习题6.6</strong> 探讨如何将sketching技术应用于图神经网络(GNN)的加速。考虑邻接矩阵和特征矩阵的联合压缩。</p>
+<p><em>Hint</em>: 利用图的谱性质和消息传递的局部性。</p>
+<details>
+<summary>答案</summary>
+<p>GNN中的sketching机会：</p>
+<ol>
+<li>
+<p><strong>邻接矩阵压缩</strong>：
+   - 谱sparsification保持切割性质
+   - 随机游走的sketch表示
+   - 保持度分布的采样</p>
+</li>
+<li>
+<p><strong>特征传播加速</strong>：
+   <code>原始: H^{(l+1)} = σ(AH^{(l)}W^{(l)})
+   Sketched: H^{(l+1)} = σ(S_A^T S_A A S_H^T S_H H^{(l)} W^{(l)})</code></p>
+</li>
+<li>
+<p><strong>联合优化</strong>：
+   - 设计相容的sketch保持：
+     $|S_A A S_H^T S_H X - AX|_F \leq \epsilon|A|_F|X|_F$</p>
+</li>
+</ol>
+<ul>
+<li>利用图的社区结构</li>
+<li>自适应于不同层的需求</li>
+</ul>
+<ol start="4">
+<li><strong>理论分析</strong>：
+   - 谱图理论+JL引理
+   - 消息传递的误差传播
+   - 端到端的性能保证</li>
+</ol>
+<p>实际考虑：</p>
+<ul>
+<li>保持图的连通性</li>
+<li>处理不同大小的邻域</li>
+<li>与图采样技术的结合</li>
+</ul>
+</details>
+<p><strong>习题6.7</strong> (开放问题) 设计一个量子启发的经典sketching算法，利用张量网络结构。分析其在特定问题类上的优势。</p>
+<p><em>Hint</em>: 考虑Matrix Product States (MPS)和树张量网络。</p>
+<details>
+<summary>答案</summary>
+<p>量子启发sketching的设计：</p>
+<ol>
+<li>
+<p><strong>MPS表示</strong>：
+   - 将高维向量表示为张量链
+   - 每个张量维度 $O(\text{poly}(\log d))$
+   - 自然的维度约简</p>
+</li>
+<li>
+<p><strong>树张量网络sketch</strong>：
+   - 层次化的信息聚合
+   - 类似小波变换的多分辨率
+   - 保持局部相关性</p>
+</li>
+<li>
+<p><strong>优势分析</strong>：
+   - 对于低纠缠态：指数压缩
+   - 对于局部相关数据：保持结构
+   - 可并行化的更新</p>
+</li>
+<li>
+<p><strong>算法框架</strong>：
+   <code>输入分解 → 张量化 → 网络收缩 → 低秩截断</code></p>
+</li>
+<li>
+<p><strong>理论挑战</strong>：
+   - 经典数据的"纠缠"度量
+   - 与传统方法的严格比较
+   - 计算复杂度的精确分析</p>
+</li>
+</ol>
+<p>研究方向：</p>
+<ul>
+<li>与量子算法的形式对应</li>
+<li>在机器学习中的应用</li>
+<li>硬件加速的可能性</li>
+</ul>
+</details>
+<p><strong>习题6.8</strong> 研究sketching在联邦学习中的应用，设计一个通信高效且隐私保护的梯度聚合方案。</p>
+<p><em>Hint</em>: 结合差分隐私和安全聚合。</p>
+<details>
+<summary>答案</summary>
+<p>联邦学习中的Sketched梯度聚合：</p>
+<ol>
+<li>
+<p><strong>基本方案</strong>：
+   - 客户端：$\tilde{\mathbf{g}}_i = \mathbf{S}_i \mathbf{g}_i + \mathbf{n}_i$
+   - 服务器：$\bar{\mathbf{g}} = \frac{1}{n}\sum_i \mathbf{S}_i^T \tilde{\mathbf{g}}_i$</p>
+</li>
+<li>
+<p><strong>隐私保证</strong>：
+   - 差分隐私噪声：$\mathbf{n}_i \sim \mathcal{N}(0, \sigma^2 \mathbf{I})$
+   - 组合sketching降低敏感度
+   - 形式化隐私预算分析</p>
+</li>
+<li>
+<p><strong>通信优化</strong>：
+   - 压缩率：$O(k/d)$，其中 $k = O(\log n / \epsilon^2)$
+   - 量化sketched梯度
+   - 稀疏化传输</p>
+</li>
+<li>
+<p><strong>安全聚合</strong>：
+   - 使用同态加密的sketch
+   - 秘密共享的分布式sketch
+   - 验证sketch的完整性</p>
+</li>
+<li>
+<p><strong>收敛性分析</strong>：
+   - Sketching误差 + 隐私噪声
+   - 非凸优化的收敛率
+   - 与通信轮数的权衡</p>
+</li>
+</ol>
+<p>实际部署考虑：</p>
+<ul>
+<li>异构客户端的处理</li>
+<li>掉线容错机制</li>
+<li>自适应sketch大小</li>
+</ul>
+</details>
+<h2 id="_12">进一步研究方向</h2>
+<ol>
+<li>
+<p><strong>理论深化</strong>：
+   - 数据相关sketch的最优性刻画
+   - 非线性sketching的可能性
+   - 与信息论界限的关系</p>
+</li>
+<li>
+<p><strong>算法创新</strong>：
+   - 自适应和在线算法设计
+   - 多模态数据的联合sketching
+   - 量子-经典混合算法</p>
+</li>
+<li>
+<p><strong>系统优化</strong>：
+   - 硬件感知的实现
+   - 分布式和流式处理
+   - 端到端的系统设计</p>
+</li>
+<li>
+<p><strong>应用拓展</strong>：
+   - 科学计算中的新应用
+   - 与其他AI技术的结合
+   - 实际系统的部署经验</p>
+</li>
+</ol>
+<h2 id="_13">推荐阅读</h2>
+<ul>
+<li>Woodruff, D. P. (2014). "Sketching as a Tool for Numerical Linear Algebra"</li>
+<li>Liberty, E. (2013). "Simple and Deterministic Matrix Sketching"</li>
+<li>Halko, N., Martinsson, P. G., &amp; Tropp, J. A. (2011). "Finding Structure with Randomness"</li>
+<li>Clarkson, K. L., &amp; Woodruff, D. P. (2017). "Low-Rank Approximation and Regression in Input Sparsity Time"</li>
+</ul>
+            </article>
+            
+            <nav class="page-nav"><a href="./chapter5.html" class="nav-link prev">← 第5章：Schur补的妙用</a><a href="./chapter7.html" class="nav-link next">第7章：随机化数值线性代数 →</a></nav>
+        </main>
+    </div>
+</body>
+</html>

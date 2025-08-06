@@ -1,0 +1,1344 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第11章：流形预条件技术</title>
+    <link rel="stylesheet" href="./assets/style.css">
+    <link rel="stylesheet" href="./assets/highlight.css">
+    <script src="./assets/script.js" defer></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$']],
+                displayMath: [['$$', '$$']],
+                processEscapes: false,
+                packages: {'[+]': ['noerrors']}
+            },
+            options: {
+                ignoreHtmlClass: 'tex2jax_ignore',
+                processHtmlClass: 'tex2jax_process'
+            },
+            loader: {
+                load: ['[tex]/noerrors']
+            }
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <nav id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <h3>目录</h3>
+                <button id="sidebar-toggle" class="sidebar-toggle">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+            <ul class="nav-list"><li class=""><a href="./index.html">高级大规模矩阵计算教程</a></li><li class=""><a href="./chapter1.html">第1章：二阶优化的统一框架</a></li><li class=""><a href="./chapter2.html">第2章：Hessian近似的艺术</a></li><li class=""><a href="./chapter3.html">第3章：结构化二阶方法</a></li><li class=""><a href="./chapter4.html">第4章：增量Hessian计算</a></li><li class=""><a href="./chapter5.html">第5章：Schur补的妙用</a></li><li class=""><a href="./chapter6.html">第6章：矩阵Sketching技术</a></li><li class=""><a href="./chapter7.html">第7章：随机化数值线性代数</a></li><li class=""><a href="./chapter8.html">第8章：分布式矩阵运算</a></li><li class=""><a href="./chapter9.html">第9章：异步优化的数学基础</a></li><li class=""><a href="./chapter10.html">第10章：Riemannian优化基础</a></li><li class="active"><a href="./chapter11.html">第11章：流形预条件技术</a></li><li class=""><a href="./chapter12.html">第12章：结构化矩阵的快速算法</a></li><li class=""><a href="./chapter13.html">第13章：动态低秩近似</a></li><li class=""><a href="./chapter14.html">第14章：大规模协同过滤的矩阵技术</a></li><li class=""><a href="./chapter15.html">第15章：实时推荐的增量矩阵方法</a></li><li class=""><a href="./chapter16.html">第16章：多模态推荐的张量分解</a></li><li class=""><a href="./chapter17.html">第17章：隐式微分与双层优化</a></li><li class=""><a href="./chapter18.html">第18章：量子启发的矩阵算法</a></li><li class=""><a href="./chapter19.html">附录A：数值稳定性速查表</a></li><li class=""><a href="./chapter20.html">附录B：性能调优检查清单</a></li><li class=""><a href="./chapter21.html">附录C：常用矩阵恒等式</a></li><li class=""><a href="./CLAUDE.html">高级大规模矩阵计算教程项目说明</a></li><li class=""><a href="./README.html">高级大规模矩阵计算教程</a></li></ul>
+        </nav>
+        
+        <main class="content">
+            <article>
+                <h1 id="11">第11章：流形预条件技术</h1>
+<p>流形优化中的预条件技术是将欧氏空间中成熟的二阶方法推广到曲线空间的关键桥梁。本章深入探讨如何在保持几何结构的同时，利用曲率信息加速收敛。我们将看到，恰当的预条件不仅能显著提升算法效率，还能揭示问题的内在几何结构。</p>
+<h2 id="111-natural-gradient">11.1 流形上的Natural Gradient</h2>
+<h3 id="1111">11.1.1 从信息几何到优化</h3>
+<p>在机器学习中，参数空间往往具有自然的Riemannian结构。最典型的例子是概率分布的参数空间，其上的Fisher信息矩阵定义了一个自然的Riemannian度量：</p>
+<p>$$g_{ij}(\theta) = \mathbb{E}_{p(x|\theta)}\left[\frac{\partial \log p(x|\theta)}{\partial \theta_i} \frac{\partial \log p(x|\theta)}{\partial \theta_j}\right]$$
+Natural Gradient方法的核心思想是在这个几何结构下进行最陡下降：
+$$\theta_{k+1} = \theta_k - \alpha_k G^{-1}(\theta_k) \nabla f(\theta_k)$$
+其中$G(\theta)$是度量张量的矩阵表示。</p>
+<h3 id="1112-natural-gradient">11.1.2 流形Natural Gradient的一般形式</h3>
+<p>对于一般的Riemannian流形$\mathcal{M}$，Natural Gradient更新可以写成：
+$$x_{k+1} = \mathcal{R}_{x_k}(-\alpha_k \xi_k)$$
+其中：</p>
+<ul>
+<li>$\xi_k = G_{x_k}^{-1}(\text{grad} f(x_k))$是预条件后的搜索方向</li>
+<li>$G_{x_k}$是点$x_k$处的Riemannian度量</li>
+<li>$\mathcal{R}_{x_k}$是回缩映射</li>
+</ul>
+<p>关键观察：Natural Gradient在流形上的表现形式自然地结合了几何结构和函数的局部信息。</p>
+<h3 id="1113">11.1.3 度量选择的艺术</h3>
+<p>不同的度量选择导致不同的算法行为：</p>
+<ol>
+<li>
+<p><strong>标准度量</strong>：对于$\text{St}(p,n)$（Stiefel流形），标准度量是
+$$g_X(\xi, \eta) = \text{tr}(\xi^T(I - \frac{1}{2}XX^T)\eta)$$</p>
+</li>
+<li>
+<p><strong>欧氏度量</strong>：简单地继承环境空间的度量
+$$g_X(\xi, \eta) = \text{tr}(\xi^T\eta)$$</p>
+</li>
+<li>
+<p><strong>问题相关度量</strong>：基于目标函数的Hessian信息构造
+$$g_X(\xi, \eta) = \langle \xi, \mathcal{H}_X[\eta] \rangle$$</p>
+</li>
+</ol>
+<h3 id="1114">11.1.4 高效实现策略</h3>
+<p>计算$G^{-1}\text{grad} f$的主要挑战在于：</p>
+<ul>
+<li>度量张量可能是稠密的</li>
+<li>直接求逆计算代价高昂</li>
+<li>数值稳定性要求</li>
+</ul>
+<p>实践中常用的技巧包括：</p>
+<ol>
+<li><strong>对角近似</strong>：当度量接近对角时，使用对角预条件</li>
+<li><strong>低秩修正</strong>：利用Woodbury公式处理低秩扰动</li>
+<li><strong>迭代求解</strong>：使用共轭梯度法求解线性系统$G\xi = \text{grad} f$</li>
+</ol>
+<h3 id="1115">11.1.5 收敛性分析要点</h3>
+<p>Natural Gradient在流形上的收敛性依赖于：</p>
+<ul>
+<li>度量的Lipschitz连续性</li>
+<li>目标函数的测地凸性</li>
+<li>步长选择策略</li>
+</ul>
+<p>关键定理：在适当条件下，Natural Gradient达到局部二次收敛率。</p>
+<h3 id="1116">11.1.6 与经典方法的联系</h3>
+<p>有趣的是，许多经典算法可以视为特定流形上的Natural Gradient：</p>
+<ul>
+<li><strong>矩阵Scaling</strong>：正定矩阵流形上的Natural Gradient</li>
+<li><strong>Riemannian共轭梯度</strong>：使用特定度量的预条件共轭梯度</li>
+<li><strong>测地Newton法</strong>：二阶Natural Gradient</li>
+</ul>
+<p>具体例子：</p>
+<ol>
+<li><strong>Sinkhorn算法</strong>：可视为Wasserstein流形上的Natural Gradient</li>
+<li><strong>幂方法</strong>：单位球面上使用特定度量的Natural Gradient</li>
+<li><strong>交替最小化</strong>：某些乘积流形上的块坐标Natural Gradient</li>
+</ol>
+<h3 id="1117">11.1.7 计算优化技巧</h3>
+<p>在实际实现Natural Gradient时，以下技巧至关重要：</p>
+<ol>
+<li>
+<p><strong>度量矩阵的高效表示</strong>：
+   - 利用Kronecker结构：$G = A \otimes B$
+   - 稀疏模式识别：只存储非零元素
+   - 低秩分解：$G = UU^T + \sigma I$</p>
+</li>
+<li>
+<p><strong>预条件系统的迭代求解</strong>：
+   <code>PCG算法框架：
+   输入：线性系统 Gx = b，预条件子M
+   初始化：r₀ = b - Gx₀, z₀ = M⁻¹r₀, p₀ = z₀
+   迭代直到收敛：
+     αₖ = (rₖᵀzₖ)/(pₖᵀGpₖ)
+     xₖ₊₁ = xₖ + αₖpₖ
+     rₖ₊₁ = rₖ - αₖGpₖ
+     zₖ₊₁ = M⁻¹rₖ₊₁
+     βₖ = (rₖ₊₁ᵀzₖ₊₁)/(rₖᵀzₖ)
+     pₖ₊₁ = zₖ₊₁ + βₖpₖ</code></p>
+</li>
+<li>
+<p><strong>自适应精度控制</strong>：
+   - 远离最优点时使用低精度
+   - 接近收敛时提高求解精度
+   - 基于梯度范数动态调整</p>
+</li>
+</ol>
+<h3 id="1118">11.1.8 在深度学习中的应用</h3>
+<p>Natural Gradient在现代深度学习中有重要应用：</p>
+<ol>
+<li>
+<p><strong>K-FAC (Kronecker-Factored Approximate Curvature)</strong>：
+   - 将Fisher矩阵近似为Kronecker积
+   - 显著减少存储和计算需求
+   - 在大规模网络中实用</p>
+</li>
+<li>
+<p><strong>TONGA (Toroidal Natural Gradient Ascent)</strong>：
+   - 专门用于环形拓扑的参数空间
+   - 在循环神经网络中特别有效</p>
+</li>
+<li>
+<p><strong>Shampoo算法</strong>：
+   - 使用块对角加Kronecker结构
+   - 在Transformer训练中表现优异</p>
+</li>
+</ol>
+<h3 id="1119">11.1.9 理论深入：信息几何视角</h3>
+<p>从信息几何角度理解Natural Gradient提供了深刻洞察：</p>
+<ol>
+<li>
+<p><strong>KL散度与Fisher信息</strong>：
+$$D_{KL}(p_{\theta}||p_{\theta+\delta}) \approx \frac{1}{2}\delta^T G(\theta) \delta$$
+这表明Fisher信息矩阵测量了参数空间中的"信息距离"。</p>
+</li>
+<li>
+<p><strong>α-联络与几何结构</strong>：
+   - 不同的α值定义不同的几何结构
+   - α=0对应混合联络（自然梯度）
+   - α=±1对应指数和混合联络</p>
+</li>
+<li>
+<p><strong>对偶结构</strong>：
+   - 参数空间与期望参数空间的对偶
+   - 通过Legendre变换联系
+   - 提供了算法设计的新视角</p>
+</li>
+</ol>
+<h3 id="11110">11.1.10 数值稳定性深入分析</h3>
+<p>Natural Gradient的数值稳定性挑战及解决方案：</p>
+<ol>
+<li>
+<p><strong>病态Fisher矩阵</strong>：
+   - 添加Tikhonov正则化：$\tilde{G} = G + \lambda I$
+   - 使用谱截断：保留前k个特征值
+   - 自适应调整正则化参数</p>
+</li>
+<li>
+<p><strong>梯度爆炸/消失</strong>：
+   - 梯度裁剪：$\xi = \min(1, \frac{c}{||\xi||}) \xi$
+   - 层归一化技术
+   - 自适应步长调整</p>
+</li>
+<li>
+<p><strong>计算精度损失</strong>：
+   - 使用双精度计算关键步骤
+   - Kahan求和算法减少舍入误差
+   - 定期重新计算基准值</p>
+</li>
+</ol>
+<h3 id="11111">11.1.11 前沿研究方向</h3>
+<p>Natural Gradient方法的活跃研究领域：</p>
+<ol>
+<li>
+<p><strong>量子Natural Gradient</strong>：
+   - 在量子参数优化中的应用
+   - Fubini-Study度量的使用
+   - 与经典方法的性能比较</p>
+</li>
+<li>
+<p><strong>分布式Natural Gradient</strong>：
+   - Fisher矩阵的分布式计算
+   - 通信高效的近似方案
+   - 异步更新策略</p>
+</li>
+<li>
+<p><strong>元学习中的Natural Gradient</strong>：
+   - 任务空间的自然几何
+   - 快速适应的理论基础
+   - 与MAML等方法的联系</p>
+</li>
+<li>
+<p><strong>隐式Natural Gradient</strong>：
+   - 避免显式计算Fisher矩阵
+   - 通过动量方法隐式实现
+   - 理论分析与实践验证</p>
+</li>
+</ol>
+<h2 id="112-riemannian-bfgs">11.2 Riemannian BFGS方法</h2>
+<h3 id="1121">11.2.1 动机与基本思想</h3>
+<p>BFGS方法在欧氏空间中的成功激发了其在流形上的推广。核心挑战在于如何在曲线空间中维护和更新Hessian近似。Riemannian BFGS (RBFGS)通过巧妙利用向量传输解决了这一问题。</p>
+<p>基本更新公式遵循拟Newton条件：
+$$\mathcal{H}_{k+1} s_k = y_k$$
+其中：</p>
+<ul>
+<li>$s_k = \mathcal{T}_{x_k}^{x_{k+1}} \xi_k$是步长的向量传输</li>
+<li>$y_k = \text{grad} f(x_{k+1}) - \mathcal{T}_{x_k}^{x_{k+1}} \text{grad} f(x_k)$</li>
+</ul>
+<h3 id="1122">11.2.2 向量传输的选择</h3>
+<p>向量传输$\mathcal{T}$的选择对算法性能至关重要：</p>
+<ol>
+<li>
+<p><strong>平行传输</strong>：保持向量"方向"不变，理论性质最好
+   - 优点：保度量、保正交性
+   - 缺点：计算代价可能很高</p>
+</li>
+<li>
+<p><strong>投影传输</strong>：简单地投影到切空间
+$$\mathcal{T}_{x}^{y} \xi = \mathcal{P}_{T_y\mathcal{M}} \xi$$</p>
+</li>
+</ol>
+<ul>
+<li>优点：计算简单</li>
+<li>缺点：可能不保度量</li>
+</ul>
+<ol start="3">
+<li><strong>向量场传输</strong>：利用流形的向量场结构
+   - 适用于具有Lie群作用的流形</li>
+</ol>
+<h3 id="1123-rbfgs">11.2.3 RBFGS更新公式</h3>
+<p>给定当前Hessian近似$\mathcal{H}_k$，更新公式为：
+$$\mathcal{H}_{k+1} = \mathcal{H}_k - \frac{\mathcal{H}_k s_k s_k^T \mathcal{H}_k}{s_k^T \mathcal{H}_k s_k} + \frac{y_k y_k^T}{y_k^T s_k}$$
+注意：所有运算都在切空间$T_{x_{k+1}}\mathcal{M}$中进行。</p>
+<h3 id="1124-l-rbfgs">11.2.4 有限内存变体 (L-RBFGS)</h3>
+<p>对于大规模问题，有限内存版本更实用：</p>
+<ol>
+<li>存储最近$m$对$(s_i, y_i)$</li>
+<li>使用两循环递归计算搜索方向</li>
+<li>初始Hessian近似的巧妙选择：
+$$\mathcal{H}_0 = \frac{y_{k-1}^T s_{k-1}}{y_{k-1}^T y_{k-1}} I$$</li>
+</ol>
+<h3 id="1125">11.2.5 数值稳定性考虑</h3>
+<p>RBFGS实现中的关键数值问题：</p>
+<ol>
+<li>
+<p><strong>曲率条件</strong>：确保$y_k^T s_k &gt; 0$
+   - 可能需要修正$y_k$或使用阻尼策略</p>
+</li>
+<li>
+<p><strong>正定性维护</strong>：
+   - 使用修正BFGS公式
+   - Powell-Wolfe线搜索条件</p>
+</li>
+<li>
+<p><strong>向量传输的数值误差</strong>：
+   - 累积误差可能破坏收敛性
+   - 定期重置或重正交化</p>
+</li>
+</ol>
+<h3 id="1126">11.2.6 收敛性理论</h3>
+<p>关键结果：</p>
+<ul>
+<li><strong>局部超线性收敛</strong>：在适当条件下，RBFGS达到超线性收敛率</li>
+<li><strong>全局收敛</strong>：配合适当的线搜索，保证全局收敛到驻点</li>
+</ul>
+<p>收敛速度依赖于：</p>
+<ul>
+<li>向量传输的等距性</li>
+<li>Hessian的Lipschitz连续性</li>
+<li>初始点选择</li>
+</ul>
+<h3 id="1127">11.2.7 实际应用案例</h3>
+<ol>
+<li><strong>低秩矩阵优化</strong>：在Grassmann流形上的RBFGS</li>
+<li><strong>张量分解</strong>：在乘积流形上的应用</li>
+<li><strong>深度学习</strong>：正交约束下的网络训练</li>
+</ol>
+<p>让我们深入这些应用：</p>
+<p><strong>案例1：Netflix奖问题的几何视角</strong></p>
+<ul>
+<li>使用Grassmann流形建模低秩矩阵分解</li>
+<li>RBFGS相比梯度下降加速3-5倍</li>
+<li>关键：利用了问题的内在低维结构</li>
+</ul>
+<p><strong>案例2：脑成像数据的张量分解</strong></p>
+<ul>
+<li>fMRI数据的多路分解</li>
+<li>在$\mathcal{St}(r_1,n_1) \times \mathcal{St}(r_2,n_2) \times \mathcal{St}(r_3,n_3)$上优化</li>
+<li>RBFGS处理高维数据的优势明显</li>
+</ul>
+<p><strong>案例3：正交递归神经网络</strong></p>
+<ul>
+<li>解决梯度消失/爆炸问题</li>
+<li>在Stiefel流形上保持权重正交性</li>
+<li>长序列建模性能提升显著</li>
+</ul>
+<h3 id="1128">11.2.8 实现细节与代码结构</h3>
+<p>虽然我们不展示具体代码，但理解RBFGS的实现结构很重要：</p>
+<ol>
+<li>
+<p><strong>核心数据结构</strong>：
+   - 存储结构：循环缓冲区存储$(s_k, y_k)$对
+   - 向量传输缓存：避免重复计算
+   - 度量信息：根据流形类型特化</p>
+</li>
+<li>
+<p><strong>算法流程</strong>：
+   ```
+   RBFGS主循环：</p>
+</li>
+<li>
+<p>计算Riemannian梯度</p>
+</li>
+<li>使用两循环递归计算搜索方向</li>
+<li>执行线搜索（测地线搜索）</li>
+<li>更新位置（通过回缩）</li>
+<li>计算向量传输</li>
+<li>更新BFGS存储</li>
+<li>
+<p>检查收敛条件
+   ```</p>
+</li>
+<li>
+<p><strong>性能优化要点</strong>：
+   - 向量化所有可能的运算
+   - 利用流形的对称性减少计算
+   - 智能内存管理避免频繁分配</p>
+</li>
+</ol>
+<h3 id="1129">11.2.9 与其他二阶方法的比较</h3>
+<p>RBFGS在流形优化方法谱系中的位置：</p>
+<ol>
+<li>
+<p><strong>vs Riemannian Newton</strong>：
+   - Newton：需要计算/存储完整Hessian
+   - RBFGS：只需存储$2m$个向量
+   - Newton：局部二次收敛
+   - RBFGS：超线性收敛但更稳定</p>
+</li>
+<li>
+<p><strong>vs Riemannian共轭梯度</strong>：
+   - RCG：内存需求最小
+   - RBFGS：利用历史信息更充分
+   - RCG：对非凸问题可能需要频繁重启
+   - RBFGS：对曲率变化适应性更好</p>
+</li>
+<li>
+<p><strong>vs Riemannian Trust Region</strong>：
+   - RTR：全局收敛性保证更强
+   - RBFGS：实现相对简单
+   - RTR：每步需要求解子问题
+   - RBFGS：只需线搜索</p>
+</li>
+</ol>
+<h3 id="11210">11.2.10 高级变体与改进</h3>
+<p>RBFGS的现代变体解决特定挑战：</p>
+<ol>
+<li>
+<p><strong>Riemannian L-BFGS-B</strong>（带界约束）：
+   - 处理流形上的盒约束
+   - 投影梯度与RBFGS的结合
+   - 在参数有物理意义限制时有用</p>
+</li>
+<li>
+<p><strong>随机RBFGS</strong>：
+   - 使用采样梯度估计
+   - 方差缩减技术的融入
+   - 大规模机器学习应用</p>
+</li>
+<li>
+<p><strong>分布式RBFGS</strong>：
+   - 向量对的分布式存储
+   - 异步更新策略
+   - 通信与计算的权衡</p>
+</li>
+<li>
+<p><strong>自适应RBFGS</strong>：
+   - 动态调整存储大小$m$
+   - 基于曲率信息选择性更新
+   - 在线学习场景的应用</p>
+</li>
+</ol>
+<h3 id="11211">11.2.11 理论前沿：收敛速度的精细分析</h3>
+<p>最新理论结果提供了更深入的理解：</p>
+<ol>
+<li>
+<p><strong>Dennis-Moré条件的流形推广</strong>：
+$$\lim_{k \to \infty} \frac{|(\mathcal{H}_k - \text{Hess} f(x_*))s_k|}{|s_k|} = 0$$
+这保证了超线性收敛。</p>
+</li>
+<li>
+<p><strong>有限终止性质</strong>：
+   对于二次目标函数在流形上的限制，RBFGS在至多$n$步内收敛（$n$是流形维数）。</p>
+</li>
+<li>
+<p><strong>全局收敛速度</strong>：
+   在强凸情况下，可以证明：
+$$f(x_k) - f(x_*) \leq C \cdot r^k$$
+其中$r &lt; 1$依赖于条件数和步长策略。</p>
+</li>
+<li>
+<p><strong>局部收敛率的精确刻画</strong>：
+   设$x_*$是非退化极小点，且RBFGS更新满足标准假设，则：
+$$\lim_{k \to \infty} \frac{d(x_{k+1}, x_*)}{d(x_k, x_*)^{1+\tau}} = 0$$
+其中$\tau \in (0,1)$，$d(\cdot,\cdot)$是流形上的测地距离。</p>
+</li>
+<li>
+<p><strong>步长为1的接受性</strong>：
+   类似欧氏空间情形，当充分接近最优点时，单位步长最终会被接受，这对实际计算效率至关重要。</p>
+</li>
+<li>
+<p><strong>有限内存版本的收敛性</strong>：
+   即使只保存$m$对向量（$m \ll n$），在适当的紧致性假设下，L-RBFGS仍保持：</p>
+</li>
+</ol>
+<ul>
+<li>R-线性收敛（全局）</li>
+<li>R-超线性收敛（局部，当$m$足够大）</li>
+</ul>
+<h3 id="11212">11.2.12 调试与诊断技巧</h3>
+<p>实践中调试RBFGS的关键点：</p>
+<ol>
+<li>
+<p><strong>数值检查</strong>：
+   - 验证向量传输的等距性
+   - 检查拟Newton条件$\mathcal{H}_{k+1}s_k = y_k$
+   - 监控条件数变化</p>
+</li>
+<li>
+<p><strong>收敛诊断</strong>：
+   - 绘制梯度范数对数图
+   - 检查步长接受率
+   - 分析搜索方向与负梯度的夹角</p>
+</li>
+<li>
+<p><strong>常见问题排查</strong>：
+   - 收敛停滞：检查数值精度和向量传输误差
+   - 振荡行为：可能需要更保守的步长
+   - 发散：验证强Wolfe条件是否满足</p>
+</li>
+</ol>
+<h2 id="113-trust-region">11.3 几何感知的Trust Region</h2>
+<h3 id="1131-trust-region">11.3.1 流形Trust Region的基本框架</h3>
+<p>Trust Region方法在流形优化中特别有效，因为它自然地处理了曲率带来的非线性。基本思想是在每次迭代中求解子问题：
+$$\min_{\xi \in T_x\mathcal{M}} m_k(\xi) \quad \text{s.t.} \quad |\xi|_x \leq \Delta_k$$
+其中$m_k(\xi)$是目标函数的局部近似模型。</p>
+<h3 id="1132">11.3.2 模型构造的艺术</h3>
+<p>不同的模型选择导致不同的算法特性：</p>
+<ol>
+<li>
+<p><strong>一阶模型</strong>：
+$$m_k(\xi) = f(x_k) + \langle \text{grad} f(x_k), \xi \rangle_x$$</p>
+</li>
+<li>
+<p><strong>二阶模型</strong>：
+$$m_k(\xi) = f(x_k) + \langle \text{grad} f(x_k), \xi \rangle_x + \frac{1}{2}\langle \xi, \text{Hess} f(x_k)[\xi] \rangle_x$$</p>
+</li>
+<li>
+<p><strong>拟Newton模型</strong>：使用RBFGS近似替代真实Hessian</p>
+</li>
+</ol>
+<h3 id="1133">11.3.3 子问题求解策略</h3>
+<p>Trust Region子问题在流形上的求解面临独特挑战：</p>
+<ol>
+<li>
+<p><strong>Cauchy点计算</strong>：
+   - 沿负梯度方向的最优步长
+   - 提供下界保证</p>
+</li>
+<li>
+<p><strong>截断共轭梯度法</strong> (tCG)：
+   - 在切空间中迭代求解
+   - 遇到负曲率时提前终止</p>
+</li>
+<li>
+<p><strong>Steihaug-Toint算法的流形推广</strong>：
+   - 结合CG迭代与Trust Region约束
+   - 自适应处理负曲率</p>
+</li>
+</ol>
+<h3 id="1134">11.3.4 回缩映射的选择与影响</h3>
+<p>回缩映射$\mathcal{R}_x$将切向量映射回流形，其选择影响：</p>
+<ol>
+<li><strong>计算效率</strong>：指数映射vs投影回缩</li>
+<li><strong>近似质量</strong>：二阶vs一阶回缩</li>
+<li><strong>数值稳定性</strong>：大步长时的行为</li>
+</ol>
+<p>关键性质：
+$$\mathcal{R}_x(t\xi) = \gamma(t)$$
+其中$\gamma$是从$x$出发、初始速度为$\xi$的测地线。</p>
+<h3 id="1135">11.3.5 自适应半径调整</h3>
+<p>Trust Region半径$\Delta_k$的调整策略：</p>
+<ol>
+<li>
+<p><strong>预测比率</strong>：
+$$\rho_k = \frac{f(x_k) - f(\mathcal{R}_{x_k}(\xi_k))}{m_k(0) - m_k(\xi_k)}$$</p>
+</li>
+<li>
+<p><strong>更新规则</strong>：
+   - 若$\rho_k &lt; 0.25$：$\Delta_{k+1} = 0.25\Delta_k$
+   - 若$\rho_k &gt; 0.75$且$|\xi_k| = \Delta_k$：$\Delta_{k+1} = 2\Delta_k$
+   - 否则：$\Delta_{k+1} = \Delta_k$</p>
+</li>
+<li>
+<p><strong>几何考虑</strong>：
+   - 考虑流形的内蕴曲率
+   - 在高曲率区域使用更保守的半径</p>
+</li>
+</ol>
+<h3 id="1136">11.3.6 收敛性分析</h3>
+<p>Trust Region方法在流形上的收敛性质：</p>
+<ol>
+<li><strong>全局收敛</strong>：从任意初始点收敛到一阶驻点</li>
+<li><strong>局部收敛速度</strong>：
+   - 使用精确Hessian：二次收敛
+   - 使用RBFGS近似：超线性收敛</li>
+</ol>
+<p>关键假设：</p>
+<ul>
+<li>目标函数在回缩邻域内Lipschitz连续</li>
+<li>模型充分近似真实函数</li>
+</ul>
+<h3 id="1137">11.3.7 与线搜索方法的比较</h3>
+<p>Trust Region vs 线搜索在流形优化中的权衡：</p>
+<ol>
+<li>
+<p><strong>Trust Region优势</strong>：
+   - 自然处理负曲率
+   - 对病态问题更稳健
+   - 理论保证更强</p>
+</li>
+<li>
+<p><strong>线搜索优势</strong>：
+   - 实现相对简单
+   - 每步计算代价较低
+   - 对某些流形结构更自然</p>
+</li>
+<li>
+<p><strong>混合策略</strong>：
+   - 在Trust Region框架中使用线搜索
+   - 自适应切换策略</p>
+</li>
+</ol>
+<h3 id="1138">11.3.8 高级子问题求解技术</h3>
+<p>Trust Region子问题的求解是算法效率的关键：</p>
+<ol>
+<li>
+<p><strong>Lanczos方法用于大规模问题</strong>：
+   - 将Hessian投影到Krylov子空间
+   - 在低维空间求解子问题
+   - 特别适合Hessian-向量积便宜的情况</p>
+</li>
+<li>
+<p><strong>随机化方法</strong>：
+   - 使用随机投影降维
+   - Johnson-Lindenstrauss引理保证近似质量
+   - 在超高维流形上的应用</p>
+</li>
+<li>
+<p><strong>流形特定的加速技巧</strong>：
+   - Grassmann流形：利用商空间结构
+   - 对称正定矩阵流形：Cholesky分解技巧
+   - 固定秩矩阵流形：SVD更新公式</p>
+</li>
+</ol>
+<h3 id="1139-trust-region">11.3.9 Trust Region的现代变体</h3>
+<p>近年来发展的创新方法：</p>
+<ol>
+<li><strong>立方正则化方法 (ARC)</strong>：
+$$\min_{\xi} m_k(\xi) + \frac{\sigma_k}{3}|\xi|^3$$</li>
+</ol>
+<ul>
+<li>更好的理论复杂度：$O(\epsilon^{-3/2})$ vs $O(\epsilon^{-2})$</li>
+<li>自适应调整三次项系数$\sigma_k$</li>
+<li>在流形上的推广需要谨慎处理范数</li>
+</ul>
+<ol start="2">
+<li>
+<p><strong>概率Trust Region</strong>：
+   - 使用随机模型近似
+   - 适合噪声优化和大规模学习
+   - 收敛性分析基于鞅理论</p>
+</li>
+<li>
+<p><strong>多级Trust Region</strong>：
+   - 不同精度的模型层次
+   - 粗网格到细网格的递归策略
+   - 在PDE约束优化中特别有效</p>
+</li>
+</ol>
+<h3 id="11310-trust-region">11.3.10 Trust Region与流形结构的深度结合</h3>
+<p>如何充分利用流形的几何特性：</p>
+<ol>
+<li>
+<p><strong>测地凸性的利用</strong>：
+   - 当目标函数测地凸时，子问题全局最优
+   - 设计保证测地凸性的模型
+   - 凸性半径内的快速收敛</p>
+</li>
+<li>
+<p><strong>曲率自适应策略</strong>：
+   ```
+   曲率感知的半径调整：</p>
+</li>
+</ol>
+<ul>
+<li>计算截面曲率κ(x,ξ)</li>
+<li>调整有效半径：Δ_eff = min(Δ, π/(2√κ_max))</li>
+<li>避免超出凸性半径
+   ```</li>
+</ul>
+<ol start="3">
+<li><strong>对称性利用</strong>：
+   - 等变优化：利用Lie群作用
+   - 降低有效维数
+   - 在物理系统优化中常见</li>
+</ol>
+<h3 id="11311">11.3.11 数值实验深入分析</h3>
+<p>典型问题上的详细性能分析：</p>
+<ol>
+<li>
+<p><strong>主成分分析的几何优化</strong>：
+   - Stiefel流形$St(k,n)$上最大化迹
+   - Trust Region vs 标准特征值算法
+   - 结果：中等规模问题上快2-3倍</p>
+</li>
+<li>
+<p><strong>最近正定矩阵问题</strong>：
+   - 在$S_+^n$（正定矩阵流形）上投影
+   - 几何Trust Region保持正定性
+   - 避免了传统方法的特征值分解</p>
+</li>
+<li>
+<p><strong>同步问题</strong>（相位恢复）：
+   - 在$(S^1)^n$（环面）上优化
+   - Trust Region处理非凸性
+   - 相比SDP松弛方法效率提升10倍</p>
+</li>
+</ol>
+<h3 id="11312">11.3.12 理论深度：最优性条件与对偶理论</h3>
+<p>Trust Region在流形上的KKT条件：</p>
+<ol>
+<li><strong>一阶必要条件</strong>：
+   存在$\lambda \geq 0$使得：</li>
+</ol>
+<ul>
+<li>$(H + \lambda I)\xi^* = -g$</li>
+<li>$\lambda(|\xi^*| - \Delta) = 0$</li>
+<li>$H + \lambda I \succeq 0$（在流形度量下）</li>
+</ul>
+<ol start="2">
+<li>
+<p><strong>二阶充分条件</strong>：
+   - 检查缩减Hessian的正定性
+   - 在切空间的子空间中验证
+   - 与约束优化理论的联系</p>
+</li>
+<li>
+<p><strong>对偶问题</strong>：
+$$\max_{\lambda \geq 0} \min_{|\xi| \leq \Delta} L(\xi, \lambda)$$</p>
+</li>
+</ol>
+<ul>
+<li>强对偶性在适当条件下成立</li>
+<li>对偶间隙提供最优性度量</li>
+</ul>
+<h3 id="11313">11.3.13 软件工程视角</h3>
+<p>Trust Region方法的模块化实现：</p>
+<ol>
+<li><strong>接口设计</strong>：
+   ```
+   TrustRegionSolver接口：</li>
+</ol>
+<ul>
+<li>solve_subproblem(model, radius)</li>
+<li>compute_rho(actual_decrease, predicted_decrease)  </li>
+<li>update_radius(rho, step_norm, radius)
+   ```</li>
+</ul>
+<ol start="2">
+<li><strong>流形抽象</strong>：
+   ```
+   Manifold接口需要提供：</li>
+</ol>
+<ul>
+<li>retraction(x, v)</li>
+<li>inverse_retraction(x, y)</li>
+<li>vector_transport(x, y, v)</li>
+<li>norm(x, v)
+   ```</li>
+</ul>
+<ol start="3">
+<li>
+<p><strong>可扩展性考虑</strong>：
+   - 插件式子问题求解器
+   - 自定义停止准则
+   - 性能监控钩子</p>
+</li>
+<li>
+<p><strong>内存管理策略</strong>：
+   ```
+   内存池设计：</p>
+</li>
+</ol>
+<ul>
+<li>预分配切向量缓冲区</li>
+<li>重用临时矩阵存储</li>
+<li>懒惰计算与缓存失效
+   ```</li>
+</ul>
+<ol start="5">
+<li>
+<p><strong>数值精度控制</strong>：
+   - 使用Kahan求和减少舍入误差
+   - 关键运算的高精度实现
+   - 条件数监控与警告系统</p>
+</li>
+<li>
+<p><strong>调试与诊断工具</strong>：
+   ```
+   诊断输出：</p>
+</li>
+</ol>
+<ul>
+<li>每步的模型精度ρ</li>
+<li>Trust Region半径历史</li>
+<li>子问题求解迭代数</li>
+<li>梯度范数演化
+   ```</li>
+</ul>
+<h3 id="11314-trust-region">11.3.14 前沿应用：机器学习中的Trust Region</h3>
+<ol>
+<li>
+<p><strong>神经网络训练</strong>：
+   - 二阶信息的高效近似
+   - 与K-FAC等方法结合
+   - 在关键层使用Trust Region</p>
+</li>
+<li>
+<p><strong>强化学习中的应用</strong> (TRPO)：
+   - 策略空间的自然参数化
+   - KL散度作为Trust Region约束
+   - 单调改进保证</p>
+</li>
+<li>
+<p><strong>元学习与少样本学习</strong>：
+   - 参数空间的快速适应
+   - Trust Region控制适应步幅
+   - 避免灾难性遗忘</p>
+</li>
+</ol>
+<h3 id="11315">11.3.15 开放研究问题</h3>
+<p>值得深入探索的方向：</p>
+<ol>
+<li>
+<p><strong>非光滑流形优化的Trust Region</strong>：
+   - 处理不可微点
+   - 束方法的推广
+   - 应用于稀疏优化</p>
+</li>
+<li>
+<p><strong>量子优化中的Trust Region</strong>：
+   - 量子态空间的几何结构
+   - 量子近似优化算法(QAOA)改进
+   - 与变分量子算法结合</p>
+</li>
+<li>
+<p><strong>分布式Trust Region</strong>：
+   - 子问题的分布式求解
+   - 异步半径更新
+   - 拜占庭容错设计</p>
+</li>
+<li>
+<p><strong>自适应流形Trust Region</strong>：
+   - 动态调整工作流形
+   - 基于曲率的半径自适应
+   - 多尺度Trust Region策略</p>
+</li>
+</ol>
+<h2 id="114">11.4 与欧氏空间方法的性能对比</h2>
+<h3 id="1141">11.4.1 理论复杂度分析</h3>
+<p>比较流形方法与投影方法的计算复杂度：</p>
+<ol>
+<li><strong>每次迭代成本</strong>：
+   - 欧氏投影方法：$\mathcal{O}(n^2) + $ 投影成本
+   - Riemannian方法：$\mathcal{O}(n^2) + $ 回缩成本</li>
+</ol>
+<p>关键观察：对许多流形，回缩和投影的成本相当。</p>
+<ol start="2">
+<li>
+<p><strong>收敛速度</strong>：
+   - 欧氏方法：线性到超线性（取决于曲率）
+   - Riemannian方法：保持原始收敛率</p>
+</li>
+<li>
+<p><strong>内存需求</strong>：
+   - L-BFGS vs L-RBFGS：相同的$\mathcal{O}(mn)$
+   - Trust Region：额外的子问题求解器内存</p>
+</li>
+</ol>
+<h3 id="1142">11.4.2 数值实验基准</h3>
+<p>典型测试问题的性能对比：</p>
+<ol>
+<li>
+<p><strong>低秩矩阵补全</strong>（Grassmann流形）：
+   - 问题规模：$1000 \times 1000$，秩$r=10$
+   - Riemannian方法通常快2-5倍
+   - 在高噪声情况下优势更明显</p>
+</li>
+<li>
+<p><strong>特征值优化</strong>（Stiefel流形）：
+   - 寻找主特征空间
+   - 几何方法避免了重复正交化
+   - 数值稳定性显著提升</p>
+</li>
+<li>
+<p><strong>张量分解</strong>（乘积流形）：
+   - Tucker分解、CP分解
+   - 利用流形结构减少约束违反</p>
+</li>
+</ol>
+<h3 id="1143">11.4.3 算法选择指南</h3>
+<p>何时使用流形预条件方法：</p>
+<ol>
+<li>
+<p><strong>强烈推荐场景</strong>：
+   - 约束曲率大
+   - 问题具有自然的几何结构
+   - 需要高精度解
+   - 欧氏方法收敛缓慢</p>
+</li>
+<li>
+<p><strong>谨慎使用场景</strong>：
+   - 流形运算（如回缩）代价过高
+   - 问题规模极大，内存受限
+   - 只需要低精度解
+   - 缺乏高效的流形运算实现</p>
+</li>
+</ol>
+<h3 id="1144">11.4.4 实现优化技巧</h3>
+<p>提升流形方法性能的关键技巧：</p>
+<ol>
+<li>
+<p><strong>缓存几何量</strong>：
+   - 度量张量的Cholesky分解
+   - 常用的投影算子
+   - Christoffel符号（如需要）</p>
+</li>
+<li>
+<p><strong>自适应精度</strong>：
+   - 初期使用低精度回缩
+   - 接近收敛时提高精度
+   - 动态调整子问题求解精度</p>
+</li>
+<li>
+<p><strong>并行化机会</strong>：
+   - 向量传输的批处理
+   - 多个搜索方向的并行评估
+   - Trust Region子问题的并行求解</p>
+</li>
+</ol>
+<h3 id="1145">11.4.5 鲁棒性比较</h3>
+<p>数值稳定性和鲁棒性分析：</p>
+<ol>
+<li>
+<p><strong>条件数敏感性</strong>：
+   - 欧氏方法：受环境空间条件数影响
+   - 流形方法：仅受内蕴条件数影响</p>
+</li>
+<li>
+<p><strong>初始化敏感性</strong>：
+   - 流形方法通常有更大的收敛域
+   - 几何结构提供了自然的正则化</p>
+</li>
+<li>
+<p><strong>参数调优</strong>：
+   - 流形方法的超参数通常更少
+   - 默认参数的鲁棒性更好</p>
+</li>
+</ol>
+<h3 id="1146">11.4.6 前沿研究方向</h3>
+<ol>
+<li>
+<p><strong>自适应流形选择</strong>：
+   - 动态调整工作流形
+   - 多流形融合策略</p>
+</li>
+<li>
+<p><strong>硬件加速</strong>：
+   - GPU上的流形运算
+   - 专用硬件设计</p>
+</li>
+<li>
+<p><strong>与深度学习的结合</strong>：
+   - 神经网络中的流形层
+   - 几何深度学习的优化</p>
+</li>
+<li>
+<p><strong>随机流形方法</strong>：
+   - 流形上的SGD变体
+   - 方差缩减技术的推广</p>
+</li>
+</ol>
+<h2 id="115">11.5 本章小结</h2>
+<p>本章深入探讨了流形优化中的预条件技术，涵盖了三个核心方法：</p>
+<ol>
+<li>
+<p><strong>Natural Gradient方法</strong>：
+   - 利用信息几何结构加速收敛
+   - Fisher信息矩阵作为自然度量
+   - 在深度学习中的K-FAC、Shampoo等实用变体</p>
+</li>
+<li>
+<p><strong>Riemannian BFGS方法</strong>：
+   - 将经典拟Newton方法推广到流形
+   - 通过向量传输维护Hessian近似
+   - 有限内存版本适合大规模问题</p>
+</li>
+<li>
+<p><strong>几何感知Trust Region</strong>：
+   - 在曲线空间中自然处理非线性
+   - 子问题求解与回缩映射的结合
+   - 强大的全局收敛保证</p>
+</li>
+</ol>
+<p>关键洞察：</p>
+<ul>
+<li>预条件技术的核心是利用问题的几何结构</li>
+<li>恰当的度量选择可以显著改善条件数</li>
+<li>流形方法通常比投影方法更高效、更稳定</li>
+</ul>
+<h2 id="116">11.6 练习题</h2>
+<h3 id="_1">基础题</h3>
+<p><strong>练习11.1</strong> 证明Natural Gradient方向是切空间中的最陡下降方向。</p>
+<p><em>提示</em>：考虑在Riemannian度量下的优化问题 $\min_{|\xi|_g=1} \langle \text{grad} f(x), \xi \rangle$。</p>
+<details>
+<summary>答案</summary>
+<p>设$g$是Riemannian度量，目标是求解：
+$$\min_{\xi} \langle \text{grad} f(x), \xi \rangle \quad \text{s.t. } g(\xi,\xi) = 1$$
+使用Lagrange乘数法，设$L(\xi,\lambda) = \langle \text{grad} f(x), \xi \rangle + \lambda(g(\xi,\xi) - 1)$。</p>
+<p>一阶条件给出：
+$$\text{grad} f(x) + 2\lambda G\xi = 0$$</p>
+<p>因此 $\xi = -\frac{1}{2\lambda}G^{-1}\text{grad} f(x)$，这正是Natural Gradient方向（忽略归一化常数）。</p>
+</details>
+<p><strong>练习11.2</strong> 推导Stiefel流形上的RBFGS更新公式，特别注意向量传输的作用。</p>
+<p><em>提示</em>：从拟Newton条件 $\mathcal{H}_{k+1}s_k = y_k$ 出发。</p>
+<details>
+<summary>答案</summary>
+<p>Stiefel流形$\text{St}(p,n)$上的RBFGS更新需要：</p>
+<ol>
+<li>计算 $s_k = \mathcal{T}_{X_k}^{X_{k+1}} \eta_k$，其中$\eta_k$是搜索方向</li>
+<li>计算 $y_k = \text{grad} f(X_{k+1}) - \mathcal{T}_{X_k}^{X_{k+1}} \text{grad} f(X_k)$</li>
+<li>确保所有运算在切空间$T_{X_{k+1}}\text{St}(p,n)$中进行</li>
+<li>更新公式保持标准BFGS形式，但所有内积使用流形度量</li>
+</ol>
+<p>关键是向量传输保证了$s_k$和$y_k$在同一切空间中。</p>
+</details>
+<p><strong>练习11.3</strong> 说明为什么Trust Region方法在处理负曲率时比线搜索方法更有优势。</p>
+<p><em>提示</em>：考虑Hessian有负特征值时两种方法的行为。</p>
+<details>
+<summary>答案</summary>
+<p>Trust Region方法的优势：</p>
+<ol>
+<li>子问题求解自然发现负曲率方向</li>
+<li>当遇到负曲率时，沿该方向移动到Trust Region边界</li>
+<li>不需要额外的负曲率检测机制</li>
+</ol>
+<p>线搜索方法的局限：</p>
+<ol>
+<li>标准线搜索沿固定方向，可能错过负曲率</li>
+<li>需要额外修改（如负曲率方向搜索）</li>
+<li>在鞍点附近可能停滞</li>
+</ol>
+<p>Trust Region通过约束步长自然地平衡了下降和曲率利用。</p>
+</details>
+<p><strong>练习11.4</strong> 计算球面$S^{n-1}$上的Natural Gradient，其中度量是标准球面度量。</p>
+<p><em>提示</em>：球面的切空间是 $T_xS^{n-1} = {v \in \mathbb{R}^n : x^Tv = 0}$。</p>
+<details>
+<summary>答案</summary>
+<p>对于$x \in S^{n-1}$，球面度量在切空间上就是欧氏内积限制。因此：</p>
+<ol>
+<li>欧氏梯度：$\nabla f(x)$</li>
+<li>Riemannian梯度：$\text{grad} f(x) = \nabla f(x) - (x^T\nabla f(x))x$</li>
+<li>由于度量是恒等的，Natural Gradient就是Riemannian梯度</li>
+<li>更新：$x_{k+1} = \frac{x_k - \alpha \text{grad} f(x_k)}{|x_k - \alpha \text{grad} f(x_k)|}$（归一化回球面）</li>
+</ol>
+</details>
+<h3 id="_2">挑战题</h3>
+<p><strong>练习11.5</strong> 设计一个自适应选择度量的Natural Gradient算法，使其能够在优化过程中动态调整度量以改善条件数。</p>
+<p><em>提示</em>：考虑使用历史梯度信息或局部曲率信息。</p>
+<details>
+<summary>答案</summary>
+<p>自适应度量Natural Gradient算法框架：</p>
+<ol>
+<li>
+<p><strong>度量更新策略</strong>：
+   - 收集最近$m$步的梯度：${\text{grad} f(x_{k-i})}_{i=0}^{m-1}$
+   - 估计局部协方差：$C_k = \frac{1}{m}\sum_{i=0}^{m-1} g_i g_i^T$
+   - 更新度量：$G_{k+1} = \beta G_k + (1-\beta)(C_k + \epsilon I)$</p>
+</li>
+<li>
+<p><strong>条件数监控</strong>：
+   - 计算$\kappa(G_k) = \lambda_{\max}(G_k)/\lambda_{\min}(G_k)$
+   - 若$\kappa &gt; \kappa_{\max}$，增加正则化$\epsilon$</p>
+</li>
+<li>
+<p><strong>理论保证</strong>：
+   - 度量保持正定性
+   - 收敛性通过Lipschitz连续性论证
+   - 自适应性通过regret分析量化</p>
+</li>
+<li>
+<p><strong>实现考虑</strong>：
+   - 使用滑动窗口减少内存
+   - 增量更新特征值分解
+   - 在线估计主要曲率方向</p>
+</li>
+</ol>
+</details>
+<p><strong>练习11.6</strong> 分析在Grassmann流形上，RBFGS与Riemannian共轭梯度的性能差异，特别关注迭代次数与每次迭代成本的权衡。</p>
+<p><em>提示</em>：考虑不同问题规模和条件数下的表现。</p>
+<details>
+<summary>答案</summary>
+<p>性能分析要点：</p>
+<ol>
+<li>
+<p><strong>迭代次数比较</strong>：
+   - RBFGS：通常需要更少迭代（利用二阶信息）
+   - RCG：线性收敛，迭代数依赖于条件数
+   - 经验规律：RBFGS迭代数约为RCG的1/3到1/2</p>
+</li>
+<li>
+<p><strong>每次迭代成本</strong>：
+   - RBFGS：$O(np + m^2)$，其中$m$是存储的向量对数
+   - RCG：$O(np)$，主要是矩阵向量乘法
+   - Grassmann上的特殊结构可以进一步优化</p>
+</li>
+<li>
+<p><strong>内存需求</strong>：
+   - L-RBFGS：$O(mn)$
+   - RCG：$O(n)$
+   - 当内存受限时RCG有优势</p>
+</li>
+<li>
+<p><strong>实际建议</strong>：
+   - 中等规模高精度：选择RBFGS
+   - 超大规模低精度：选择RCG
+   - 病态问题：RBFGS配合预条件</p>
+</li>
+</ol>
+</details>
+<p><strong>练习11.7</strong> 推导流形Trust Region方法的最坏情况迭代复杂度，并与欧氏空间的结果比较。</p>
+<p><em>提示</em>：使用立方正则化模型的分析技术。</p>
+<details>
+<summary>答案</summary>
+<p>最坏情况复杂度分析：</p>
+<ol>
+<li>
+<p><strong>一阶驻点</strong>：
+   - 流形TR：$O(\epsilon^{-2})$次迭代达到$|\text{grad} f(x)| \leq \epsilon$
+   - 与欧氏空间相同的复杂度</p>
+</li>
+<li>
+<p><strong>二阶驻点</strong>：
+   - 需要$O(\epsilon^{-3})$次迭代达到近似二阶驻点
+   - 立方正则化可改进到$O(\epsilon^{-3/2})$</p>
+</li>
+<li>
+<p><strong>关键假设</strong>：
+   - Lipschitz连续梯度（常数$L_g$）
+   - Lipschitz连续Hessian（常数$L_H$）
+   - 这些常数在流形上可能与欧氏空间不同</p>
+</li>
+<li>
+<p><strong>流形特有因素</strong>：
+   - 曲率影响有效Lipschitz常数
+   - 需要考虑回缩映射的近似误差
+   - 在高曲率区域可能需要更多迭代</p>
+</li>
+</ol>
+<p>总结：理论复杂度相同，但常数因子可能不同。</p>
+</details>
+<h2 id="117">11.7 常见陷阱与错误</h2>
+<h3 id="1171-natural-gradient">11.7.1 Natural Gradient实现陷阱</h3>
+<ol>
+<li>
+<p><strong>Fisher矩阵的错误估计</strong>：
+   - 错误：使用单个样本估计Fisher矩阵
+   - 正确：使用批量样本或移动平均
+   - 影响：单样本估计方差过大，导致不稳定</p>
+</li>
+<li>
+<p><strong>数值稳定性问题</strong>：
+   - 错误：直接求逆$G^{-1}$
+   - 正确：添加正则化$G + \lambda I$或使用Cholesky分解
+   - 影响：矩阵接近奇异时数值错误</p>
+</li>
+<li>
+<p><strong>度量更新频率</strong>：
+   - 错误：每步都重新计算完整Fisher矩阵
+   - 正确：周期性更新或使用增量更新
+   - 影响：计算开销过大</p>
+</li>
+</ol>
+<h3 id="1172-rbfgs">11.7.2 RBFGS常见错误</h3>
+<ol>
+<li>
+<p><strong>向量传输的忽视</strong>：
+   - 错误：直接使用欧氏空间的BFGS公式
+   - 正确：所有向量必须传输到同一切空间
+   - 影响：破坏算法收敛性</p>
+</li>
+<li>
+<p><strong>曲率条件违反</strong>：
+   - 错误：不检查$y_k^Ts_k &gt; 0$
+   - 正确：使用damping或跳过不满足条件的更新
+   - 影响：Hessian近似失去正定性</p>
+</li>
+<li>
+<p><strong>内存管理错误</strong>：
+   - 错误：存储过多历史向量对
+   - 正确：限制存储数量，使用循环缓冲
+   - 影响：内存溢出或cache miss增加</p>
+</li>
+</ol>
+<h3 id="1173-trust-region">11.7.3 Trust Region实现陷阱</h3>
+<ol>
+<li>
+<p><strong>子问题求解精度</strong>：
+   - 错误：过度求解子问题
+   - 正确：使用相对精度准则，远离最优时可以粗糙
+   - 影响：浪费计算资源</p>
+</li>
+<li>
+<p><strong>半径更新策略</strong>：
+   - 错误：半径调整过于激进
+   - 正确：使用保守的更新因子（如0.25和2.0）
+   - 影响：算法震荡或进展缓慢</p>
+</li>
+<li>
+<p><strong>回缩映射选择</strong>：
+   - 错误：总是使用指数映射
+   - 正确：根据流形特性选择高效回缩
+   - 影响：不必要的计算开销</p>
+</li>
+</ol>
+<h3 id="1174">11.7.4 流形特定陷阱</h3>
+<ol>
+<li>
+<p><strong>Stiefel流形上的正交性丢失</strong>：
+   - 错误：数值误差累积导致正交性损失
+   - 正确：周期性重正交化或使用稳定的参数化
+   - 影响：约束违反，结果无效</p>
+</li>
+<li>
+<p><strong>Grassmann流形的商空间处理</strong>：
+   - 错误：忽略等价类结构
+   - 正确：选择标准代表元，保持一致性
+   - 影响：算法行为不确定</p>
+</li>
+<li>
+<p><strong>正定矩阵流形的数值问题</strong>：
+   - 错误：直接参数化可能产生非正定矩阵
+   - 正确：使用Cholesky因子或其他保证正定性的参数化
+   - 影响：优化过程中违反流形约束</p>
+</li>
+</ol>
+<h3 id="1175">11.7.5 性能调优陷阱</h3>
+<ol>
+<li>
+<p><strong>过早优化</strong>：
+   - 错误：一开始就追求最优实现
+   - 正确：先保证正确性，再优化性能
+   - 影响：引入难以调试的错误</p>
+</li>
+<li>
+<p><strong>忽视缓存局部性</strong>：
+   - 错误：随机内存访问模式
+   - 正确：设计cache-friendly的数据布局
+   - 影响：性能下降10倍以上</p>
+</li>
+<li>
+<p><strong>并行化错误</strong>：
+   - 错误：细粒度并行化导致同步开销
+   - 正确：识别合适的并行粒度
+   - 影响：并行效率低下</p>
+</li>
+</ol>
+<h2 id="118">11.8 最佳实践检查清单</h2>
+<h3 id="1181">11.8.1 算法选择检查清单</h3>
+<p>□ <strong>问题规模评估</strong></p>
+<ul>
+<li>流形维数是否适中（&lt;10000）？</li>
+<li>是否需要高精度解？</li>
+<li>内存限制是否严格？</li>
+</ul>
+<p>□ <strong>几何结构分析</strong></p>
+<ul>
+<li>流形曲率是否已知？</li>
+<li>是否有高效的回缩映射？</li>
+<li>切空间运算成本如何？</li>
+</ul>
+<p>□ <strong>收敛需求确认</strong></p>
+<ul>
+<li>是否需要全局收敛保证？</li>
+<li>局部收敛速度要求？</li>
+<li>对初始点敏感性？</li>
+</ul>
+<h3 id="1182">11.8.2 实现质量检查清单</h3>
+<p>□ <strong>数值稳定性保证</strong></p>
+<ul>
+<li>所有矩阵运算是否有条件数检查？</li>
+<li>是否处理了接近零的除法？</li>
+<li>迭代更新是否保持流形约束？</li>
+</ul>
+<p>□ <strong>性能优化验证</strong></p>
+<ul>
+<li>是否profile确认了性能瓶颈？</li>
+<li>内存访问模式是否优化？</li>
+<li>并行化是否带来实际加速？</li>
+</ul>
+<p>□ <strong>调试工具完备</strong></p>
+<ul>
+<li>是否有收敛诊断输出？</li>
+<li>能否可视化优化轨迹？</li>
+<li>是否保存了中间结果用于分析？</li>
+</ul>
+<h3 id="1183">11.8.3 参数调优检查清单</h3>
+<p>□ <strong>Natural Gradient参数</strong></p>
+<ul>
+<li>Fisher矩阵正则化参数$\lambda$选择合理？</li>
+<li>批量大小是否足够估计Fisher矩阵？</li>
+<li>度量更新频率是否合适？</li>
+</ul>
+<p>□ <strong>RBFGS参数</strong></p>
+<ul>
+<li>存储的向量对数量$m$是否合适？</li>
+<li>线搜索参数（Wolfe条件）是否调整？</li>
+<li>初始Hessian近似是否合理？</li>
+</ul>
+<p>□ <strong>Trust Region参数</strong></p>
+<ul>
+<li>初始半径$\Delta_0$是否与问题规模匹配？</li>
+<li>半径更新阈值是否需要调整？</li>
+<li>子问题求解精度是否自适应？</li>
+</ul>
+<h3 id="1184">11.8.4 验证与测试检查清单</h3>
+<p>□ <strong>算法正确性验证</strong></p>
+<ul>
+<li>是否在已知解的问题上测试？</li>
+<li>梯度/Hessian是否通过有限差分验证？</li>
+<li>是否测试了边界情况？</li>
+</ul>
+<p>□ <strong>性能基准测试</strong></p>
+<ul>
+<li>是否与标准方法比较？</li>
+<li>是否测试了不同问题规模？</li>
+<li>是否评估了鲁棒性？</li>
+</ul>
+<p>□ <strong>可重现性保证</strong></p>
+<ul>
+<li>随机种子是否固定？</li>
+<li>浮点运算顺序是否确定？</li>
+<li>结果是否跨平台一致？</li>
+</ul>
+<p><strong>练习11.8</strong> 设计一个结合Natural Gradient和Trust Region思想的混合算法，并分析其理论性质。</p>
+<p><em>提示</em>：考虑在Trust Region框架中使用Natural Gradient度量。</p>
+<details>
+<summary>答案</summary>
+<p>Natural Gradient Trust Region (NGTR)算法：</p>
+<ol>
+<li>
+<p><strong>算法框架</strong>：
+   <code>子问题：min_{||ξ||_G ≤ Δ} &lt;grad f(x), ξ&gt; + (1/2)&lt;ξ, H[ξ]&gt;
+   其中||ξ||_G^2 = &lt;ξ, Gξ&gt;，G是Fisher信息矩阵</code></p>
+</li>
+<li>
+<p><strong>关键特性</strong>：
+   - 结合了NG的几何适应性和TR的稳健性
+   - Trust Region在自然度量下定义
+   - 子问题在信息几何意义下求解</p>
+</li>
+<li>
+<p><strong>理论性质</strong>：
+   - 全局收敛到一阶驻点
+   - 局部二次收敛（使用精确Hessian时）
+   - 对病态Fisher矩阵的鲁棒性</p>
+</li>
+<li>
+<p><strong>实现要点</strong>：
+   - 子问题可通过变量替换$\tilde{\xi} = G^{1/2}\xi$简化
+   - 使用Lanczos方法处理大规模情形
+   - 自适应调整Fisher矩阵正则化</p>
+</li>
+<li>
+<p><strong>应用前景</strong>：
+   - 深度学习中的二阶优化
+   - 变分推断中的自然参数更新
+   - 强化学习的策略优化</p>
+</li>
+</ol>
+</details>
+            </article>
+            
+            <nav class="page-nav"><a href="./chapter10.html" class="nav-link prev">← 第10章：Riemannian优化基础</a><a href="./chapter12.html" class="nav-link next">第12章：结构化矩阵的快速算法 →</a></nav>
+        </main>
+    </div>
+</body>
+</html>

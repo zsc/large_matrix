@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>附录A：数值稳定性速查表</title>
+    <link rel="stylesheet" href="./assets/style.css">
+    <link rel="stylesheet" href="./assets/highlight.css">
+    <script src="./assets/script.js" defer></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$']],
+                displayMath: [['$$', '$$']],
+                processEscapes: false,
+                packages: {'[+]': ['noerrors']}
+            },
+            options: {
+                ignoreHtmlClass: 'tex2jax_ignore',
+                processHtmlClass: 'tex2jax_process'
+            },
+            loader: {
+                load: ['[tex]/noerrors']
+            }
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <nav id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <h3>目录</h3>
+                <button id="sidebar-toggle" class="sidebar-toggle">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+            <ul class="nav-list"><li class=""><a href="./index.html">高级大规模矩阵计算教程</a></li><li class=""><a href="./chapter1.html">第1章：二阶优化的统一框架</a></li><li class=""><a href="./chapter2.html">第2章：Hessian近似的艺术</a></li><li class=""><a href="./chapter3.html">第3章：结构化二阶方法</a></li><li class=""><a href="./chapter4.html">第4章：增量Hessian计算</a></li><li class=""><a href="./chapter5.html">第5章：Schur补的妙用</a></li><li class=""><a href="./chapter6.html">第6章：矩阵Sketching技术</a></li><li class=""><a href="./chapter7.html">第7章：随机化数值线性代数</a></li><li class=""><a href="./chapter8.html">第8章：分布式矩阵运算</a></li><li class=""><a href="./chapter9.html">第9章：异步优化的数学基础</a></li><li class=""><a href="./chapter10.html">第10章：Riemannian优化基础</a></li><li class=""><a href="./chapter11.html">第11章：流形预条件技术</a></li><li class=""><a href="./chapter12.html">第12章：结构化矩阵的快速算法</a></li><li class=""><a href="./chapter13.html">第13章：动态低秩近似</a></li><li class=""><a href="./chapter14.html">第14章：大规模协同过滤的矩阵技术</a></li><li class=""><a href="./chapter15.html">第15章：实时推荐的增量矩阵方法</a></li><li class=""><a href="./chapter16.html">第16章：多模态推荐的张量分解</a></li><li class=""><a href="./chapter17.html">第17章：隐式微分与双层优化</a></li><li class=""><a href="./chapter18.html">第18章：量子启发的矩阵算法</a></li><li class="active"><a href="./chapter19.html">附录A：数值稳定性速查表</a></li><li class=""><a href="./chapter20.html">附录B：性能调优检查清单</a></li><li class=""><a href="./chapter21.html">附录C：常用矩阵恒等式</a></li><li class=""><a href="./CLAUDE.html">高级大规模矩阵计算教程项目说明</a></li><li class=""><a href="./README.html">高级大规模矩阵计算教程</a></li></ul>
+        </nav>
+        
+        <main class="content">
+            <article>
+                <h1 id="a">附录A：数值稳定性速查表</h1>
+<p>数值稳定性是大规模矩阵计算的基石。即使算法在理论上正确，数值误差的累积也可能导致计算结果完全失真。本附录汇总了保证数值稳定性的关键技术和实用准则，为实际应用提供快速参考。特别地，我们关注那些在现代机器学习和科学计算中频繁出现但容易被忽视的稳定性问题。</p>
+<h2 id="1">1. 条件数与误差传播</h2>
+<h3 id="11">1.1 条件数的多种视角</h3>
+<p><strong>矩阵条件数</strong> $\kappa(\mathbf{A})$ 衡量了问题的敏感度：</p>
+<ul>
+<li><strong>谱条件数</strong>：$\kappa_2(\mathbf{A}) = |\mathbf{A}|_2 |\mathbf{A}^{-1}|_2 = \frac{\sigma_{\max}}{\sigma_{\min}}$</li>
+<li><strong>Frobenius条件数</strong>：$\kappa_F(\mathbf{A}) = |\mathbf{A}|_F |\mathbf{A}^{-1}|_F$</li>
+<li><strong>分量条件数</strong>：考虑输入扰动的结构性</li>
+</ul>
+<p><strong>实用估计方法</strong>：</p>
+<ul>
+<li>使用 <code>condest</code> 类函数进行快速估计（基于1-范数）</li>
+<li>通过幂迭代估计最大奇异值</li>
+<li>利用Lanczos迭代同时估计最大和最小奇异值</li>
+</ul>
+<h3 id="12">1.2 误差传播的黄金法则</h3>
+<p>对于线性系统 $\mathbf{A}\mathbf{x} = \mathbf{b}$：</p>
+<p>$$\frac{|\Delta \mathbf{x}|}{|\mathbf{x}|} \leq \kappa(\mathbf{A}) \left( \frac{|\Delta \mathbf{A}|}{|\mathbf{A}|} + \frac{|\Delta \mathbf{b}|}{|\mathbf{b}|} \right)$$
+<strong>经验准则</strong>：</p>
+<ul>
+<li>若 $\kappa(\mathbf{A}) \approx 10^k$，则期望损失 $k$ 位有效数字</li>
+<li>在双精度下，$\kappa &gt; 10^{16}$ 意味着结果可能完全不可靠</li>
+<li>对于迭代方法，条件数还影响收敛速度</li>
+</ul>
+<h3 id="13">1.3 结构化误差分析</h3>
+<p><strong>前向误差 vs 后向误差</strong>：</p>
+<ul>
+<li>前向误差：$|\hat{\mathbf{x}} - \mathbf{x}|$ （计算结果与真实解的差距）</li>
+<li>后向误差：找到 $\Delta \mathbf{A}$，使得 $(\mathbf{A} + \Delta \mathbf{A})\hat{\mathbf{x}} = \mathbf{b}$</li>
+</ul>
+<p><strong>后向稳定算法的优势</strong>：</p>
+<ul>
+<li>计算结果是某个微扰问题的精确解</li>
+<li>若原问题良态，则后向稳定保证前向误差小</li>
+<li>大多数LAPACK算法都是后向稳定的</li>
+</ul>
+<h2 id="2">2. 稳定算法速查</h2>
+<h3 id="21">2.1 线性系统求解</h3>
+<p><strong>直接法稳定性排序</strong>（从最稳定到最不稳定）：</p>
+<ol>
+<li>
+<p><strong>带选主元的LU分解</strong> (<code>GEPP</code>)
+   - 增长因子通常为 $O(n^{0.5})$
+   - 实践中非常稳定</p>
+</li>
+<li>
+<p><strong>QR分解</strong>
+   - 无条件后向稳定
+   - 计算成本约为LU的2倍</p>
+</li>
+<li>
+<p><strong>Cholesky分解</strong>（仅适用于正定矩阵）
+   - 不需要选主元
+   - 自动检测非正定性</p>
+</li>
+<li>
+<p><strong>不带选主元的LU分解</strong>
+   - 可能数值不稳定
+   - 仅在特殊结构下使用</p>
+</li>
+</ol>
+<p><strong>迭代法的稳定性考虑</strong>：</p>
+<ul>
+<li>CG法：条件数影响收敛速度，但每步都保持数值稳定</li>
+<li>GMRES：理论上有限步收敛，但舍入误差可能导致停滞</li>
+<li>BiCGSTAB：可能出现崩溃，需要重启策略</li>
+</ul>
+<h3 id="22">2.2 特征值计算</h3>
+<p><strong>标准算法的稳定性</strong>：</p>
+<ol>
+<li>
+<p><strong>对称矩阵</strong>：
+   - Jacobi方法：最稳定，能计算高精度小特征值
+   - QR算法（带Wilkinson位移）：标准选择
+   - 分治算法：并行性好，稳定性略低</p>
+</li>
+<li>
+<p><strong>非对称矩阵</strong>：
+   - Schur分解 + 特征值提取：最稳定
+   - 直接QR迭代：可能不收敛
+   - 幂方法：仅适用于主特征值</p>
+</li>
+</ol>
+<p><strong>病态特征值问题的处理</strong>：</p>
+<ul>
+<li>使用多精度算术</li>
+<li>考虑伪谱分析</li>
+<li>对于接近的特征值，计算不变子空间而非单个特征向量</li>
+</ul>
+<h3 id="23">2.3 矩阵分解的稳定性</h3>
+<p><strong>SVD计算</strong>：</p>
+<ul>
+<li>Golub-Reinsch算法：标准方法，双对角化+QR迭代</li>
+<li>Jacobi SVD：更精确但更慢</li>
+<li>随机化SVD：大规模问题的首选，但需要过采样</li>
+</ul>
+<p><strong>低秩近似的数值考虑</strong>：</p>
+<ul>
+<li>截断SVD：最优但计算昂贵</li>
+<li>随机化方法：使用过采样参数 $p \geq 5$</li>
+<li>CUR分解：保持稀疏性，但数值性质较差</li>
+</ul>
+<h3 id="24">2.4 矩阵函数的稳定计算</h3>
+<p><strong>矩阵指数 $e^{\mathbf{A}}$</strong>：</p>
+<ul>
+<li>Padé近似 + scaling and squaring：通用方法</li>
+<li>对于正规矩阵，使用特征分解</li>
+<li>Krylov方法适用于大规模稀疏情况</li>
+</ul>
+<p><strong>矩阵平方根 $\mathbf{A}^{1/2}$</strong>：</p>
+<ul>
+<li>Newton迭代：需要好的初值</li>
+<li>Schur方法：稳定但计算密集</li>
+<li>对于正定矩阵，使用Cholesky分解</li>
+</ul>
+<p><strong>矩阵对数 $\log(\mathbf{A})$</strong>：</p>
+<ul>
+<li>反scaling and squaring</li>
+<li>需要 $|\mathbf{A} - \mathbf{I}| &lt; 1$</li>
+<li>Padé近似的阶数选择很关键</li>
+</ul>
+<h2 id="3">3. 常见数值陷阱与补救措施</h2>
+<h3 id="31">3.1 病态问题的识别</h3>
+<p><strong>预警信号</strong>：</p>
+<ul>
+<li>残差小但解的扰动大</li>
+<li>迭代方法收敛极慢或停滞</li>
+<li>不同算法给出显著不同的结果</li>
+</ul>
+<p><strong>诊断工具</strong>：</p>
+<ul>
+<li>计算条件数估计</li>
+<li>检查矩阵的奇异值分布</li>
+<li>使用扰动分析验证结果</li>
+</ul>
+<h3 id="32">3.2 溢出/下溢的预防</h3>
+<p><strong>缩放策略</strong>：</p>
+<ul>
+<li>行平衡：使每行的范数相近</li>
+<li>列平衡：使每列的范数相近</li>
+<li>对称缩放：保持对称性的同时改善条件数</li>
+</ul>
+<p><strong>具体技巧</strong>：</p>
+<div class="codehilite"><pre><span></span><code>行缩放：D₁AD₂，选择D₁和D₂使得缩放后矩阵元素量级均衡
+范数计算：使用稳定的实现（如BLAS中的_nrm2）
+避免显式形成A^T A
+</code></pre></div>
+
+<h3 id="33">3.3 舍入误差的控制</h3>
+<p><strong>求和的稳定算法</strong>：</p>
+<ul>
+<li>Kahan求和：补偿舍入误差</li>
+<li>成对求和：递归地两两相加</li>
+<li>排序求和：从小到大累加</li>
+</ul>
+<p><strong>内积计算</strong>：</p>
+<ul>
+<li>使用BLAS的_dot函数（可能使用扩展精度）</li>
+<li>对于高精度需求，使用多精度算术库</li>
+<li>考虑误差自由变换（Error-Free Transformations）</li>
+</ul>
+<h3 id="34">3.4 迭代算法的停止准则</h3>
+<p><strong>相对残差准则</strong>：
+$$\frac{|\mathbf{b} - \mathbf{A}\mathbf{x}_k|}{|\mathbf{b}|} &lt; \text{tol}$$
+<strong>加权残差准则</strong>（考虑条件数）：
+$$\frac{|\mathbf{b} - \mathbf{A}\mathbf{x}_k|}{|\mathbf{A}| |\mathbf{x}_k| + |\mathbf{b}|} &lt; \text{tol}$$
+<strong>实用建议</strong>：</p>
+<ul>
+<li>设置最大迭代次数防止无限循环</li>
+<li>监控残差的下降历史</li>
+<li>对于病态问题，使用更保守的停止准则</li>
+</ul>
+<h2 id="4">4. 特殊场景的稳定性考虑</h2>
+<h3 id="41">4.1 稀疏矩阵计算</h3>
+<p><strong>填充(fill-in)与稳定性的权衡</strong>：</p>
+<ul>
+<li>最小度排序：减少填充但可能影响稳定性</li>
+<li>近似最小度（AMD）：平衡填充和数值性质</li>
+<li>嵌套剖分：保证理论界但实现复杂</li>
+</ul>
+<p><strong>不完全分解的稳定性</strong>：</p>
+<ul>
+<li>ILU(0)：可能不稳定，需要对角修正</li>
+<li>ILUT：带阈值，更稳定但填充更多</li>
+<li>Modified ILU：保持某些数学性质</li>
+</ul>
+<h3 id="42">4.2 分布式计算中的误差累积</h3>
+<p><strong>通信诱导的误差</strong>：</p>
+<ul>
+<li>异步更新带来的不一致性</li>
+<li>部分和的累积误差</li>
+<li>不同处理器的舍入差异</li>
+</ul>
+<p><strong>缓解策略</strong>：</p>
+<ul>
+<li>使用确定性的归约操作</li>
+<li>定期同步和误差修正</li>
+<li>Allreduce操作的稳定实现</li>
+</ul>
+<h3 id="43">4.3 混合精度计算</h3>
+<p><strong>迭代精化(Iterative Refinement)</strong>：</p>
+<ol>
+<li>低精度计算近似解</li>
+<li>高精度计算残差</li>
+<li>低精度求解修正方程</li>
+<li>更新解并重复</li>
+</ol>
+<p><strong>精度选择准则</strong>：</p>
+<ul>
+<li>工作精度：单精度(FP32)或半精度(FP16)</li>
+<li>残差计算：至少双精度(FP64)</li>
+<li>累加器：考虑使用扩展精度</li>
+</ul>
+<h3 id="44-gpu">4.4 GPU计算的数值特性</h3>
+<p><strong>与CPU的差异</strong>：</p>
+<ul>
+<li>不同的舍入模式</li>
+<li>融合乘加(FMA)的使用</li>
+<li>并行归约的非确定性</li>
+</ul>
+<p><strong>最佳实践</strong>：</p>
+<ul>
+<li>使用cuBLAS/cuSolver的稳定例程</li>
+<li>注意warp级别的同步</li>
+<li>对于高精度需求，考虑使用张量核心的混合精度模式</li>
+</ul>
+<h2 id="5">5. 本章小结</h2>
+<p>数值稳定性是大规模矩阵计算成功的关键。本附录总结了以下核心概念：</p>
+<ol>
+<li><strong>条件数</strong>是理解数值敏感性的基础工具，它量化了输入扰动对输出的放大效应</li>
+<li><strong>后向稳定性</strong>是评估算法质量的金标准，确保计算结果是某个邻近问题的精确解</li>
+<li><strong>算法选择</strong>需要权衡稳定性、效率和问题结构，没有万能的最优算法</li>
+<li><strong>误差控制</strong>需要综合考虑舍入、截断和累积效应，特别是在迭代和分布式场景中</li>
+<li><strong>特殊硬件</strong>（如GPU）和<strong>混合精度</strong>计算带来新的稳定性挑战，需要专门的处理策略</li>
+</ol>
+<p>关键公式汇总：</p>
+<ul>
+<li>条件数定义：$\kappa(\mathbf{A}) = |\mathbf{A}| |\mathbf{A}^{-1}|$</li>
+<li>误差传播：$\text{相对误差} \leq \kappa \times \text{相对扰动}$</li>
+<li>机器精度：双精度 $\epsilon \approx 2.2 \times 10^{-16}$</li>
+<li>迭代精化收敛条件：$\kappa(\mathbf{A}) \cdot \epsilon &lt; 1$</li>
+</ul>
+<h2 id="6">6. 练习题</h2>
+<h3 id="_1">基础题</h3>
+<p><strong>练习 19.1</strong>：条件数估计
+给定矩阵 $\mathbf{A} = \begin{bmatrix} 1 &amp; 1 \ 1 &amp; 1+\epsilon \end{bmatrix}$，其中 $\epsilon &gt; 0$ 很小。
+a) 计算 $\kappa_2(\mathbf{A})$ 作为 $\epsilon$ 的函数
+b) 当 $\epsilon = 10^{-8}$ 时，求解 $\mathbf{A}\mathbf{x} = [2, 2+\epsilon]^T$ 预期损失多少位有效数字？</p>
+<p><em>提示</em>：先计算特征值，注意当 $\epsilon$ 很小时的近似。</p>
+<details>
+<summary>答案</summary>
+<p>a) 矩阵 $\mathbf{A}$ 的特征值为：</p>
+<ul>
+<li>$\lambda_1 = 2 + \epsilon/2 + O(\epsilon^2)$</li>
+<li>$\lambda_2 = \epsilon/2 + O(\epsilon^2)$</li>
+</ul>
+<p>因此：$\kappa_2(\mathbf{A}) = \frac{\lambda_1}{\lambda_2} \approx \frac{4}{\epsilon}$</p>
+<p>b) 当 $\epsilon = 10^{-8}$ 时，$\kappa_2(\mathbf{A}) \approx 4 \times 10^8$</p>
+<p>预期损失约 8-9 位有效数字。实际解为 $\mathbf{x} = [1, 1]^T$，但数值解可能有显著误差。</p>
+</details>
+<p><strong>练习 19.2</strong>：后向误差分析
+使用高斯消元法（无选主元）求解：
+$$\begin{bmatrix} \epsilon &amp; 1 \ 1 &amp; 1 \end{bmatrix} \begin{bmatrix} x_1 \ x_2 \end{bmatrix} = \begin{bmatrix} 1 \ 2 \end{bmatrix}$$
+其中 $\epsilon = 10^{-20}$。分析在双精度下的数值稳定性问题。</p>
+<p><em>提示</em>：追踪消元过程中的数值，注意何时出现灾难性抵消。</p>
+<details>
+<summary>答案</summary>
+<p>消元过程：</p>
+<ol>
+<li>第一步：$m_{21} = 1/\epsilon = 10^{20}$ （溢出风险）</li>
+<li>更新：$a_{22}^{(1)} = 1 - 10^{20}$ （灾难性抵消）</li>
+<li>在浮点运算中：$a_{22}^{(1)} \approx -10^{20}$</li>
+</ol>
+<p>回代得到的数值解严重偏离真实解 $x_1 = 1, x_2 = 1$。</p>
+<p>使用部分选主元可以避免这个问题：交换两行后，消元因子变为 $\epsilon$，计算稳定。</p>
+</details>
+<p><strong>练习 19.3</strong>：迭代精化
+考虑线性系统 $\mathbf{A}\mathbf{x} = \mathbf{b}$，其中 $\kappa(\mathbf{A}) = 10^6$。
+a) 如果使用单精度（$\epsilon_s \approx 10^{-7}$）求解，迭代精化能否改善结果？
+b) 需要多少次迭代才能达到双精度的精度水平？</p>
+<p><em>提示</em>：迭代精化的收敛因子约为 $\kappa(\mathbf{A}) \cdot \epsilon_{\text{work}}$。</p>
+<details>
+<summary>答案</summary>
+<p>a) 收敛因子 $\rho = \kappa(\mathbf{A}) \cdot \epsilon_s = 10^6 \times 10^{-7} = 0.1 &lt; 1$</p>
+<p>因此迭代精化会收敛，能够改善结果。</p>
+<p>b) 每次迭代误差减少因子约为 0.1。要从单精度误差（$10^{-7}$）改善到双精度（$10^{-16}$），需要误差减少 $10^9$ 倍。</p>
+<p>所需迭代次数：$k \geq \frac{\log(10^9)}{\log(10)} = 9$ 次</p>
+<p>实践中通常 2-3 次迭代就能获得显著改善。</p>
+</details>
+<h3 id="_2">挑战题</h3>
+<p><strong>练习 19.4</strong>：结构化条件数
+考虑三对角矩阵：
+$$\mathbf{T}_n = \begin{bmatrix}
+2 &amp; -1 &amp; &amp; &amp; \
+-1 &amp; 2 &amp; -1 &amp; &amp; \
+&amp; \ddots &amp; \ddots &amp; \ddots &amp; \
+&amp; &amp; -1 &amp; 2 &amp; -1 \
+&amp; &amp; &amp; -1 &amp; 2
+\end{bmatrix}_{n \times n}$$
+a) 证明 $\kappa_2(\mathbf{T}_n) = O(n^2)$
+b) 设计一个预条件子使得 $\kappa(\mathbf{M}^{-1}\mathbf{T}_n) = O(1)$
+c) 这个结果对有限差分离散化有什么启示？</p>
+<p><em>提示</em>：利用 $\mathbf{T}_n$ 的特征值显式公式，考虑离散二阶导数算子。</p>
+<details>
+<summary>答案</summary>
+<p>a) $\mathbf{T}_n$ 的特征值为：$\lambda_k = 2 - 2\cos\left(\frac{k\pi}{n+1}\right), k = 1, ..., n$</p>
+<p>最小特征值：$\lambda_1 \approx \frac{\pi^2}{(n+1)^2}$
+   最大特征值：$\lambda_n \approx 4$</p>
+<p>因此：$\kappa_2(\mathbf{T}_n) = \frac{\lambda_n}{\lambda_1} \approx \frac{4(n+1)^2}{\pi^2} = O(n^2)$</p>
+<p>b) 可以使用如下预条件子：</p>
+<ul>
+<li>多重网格方法的粗网格算子</li>
+<li>不完全Cholesky分解</li>
+<li>循环约化得到的近似逆</li>
+</ul>
+<p>这些方法都能使条件数与 $n$ 无关。</p>
+<p>c) 启示：</p>
+<ul>
+<li>网格加密导致条件数快速增长</li>
+<li>简单迭代法（如Jacobi）收敛变慢</li>
+<li>多尺度方法是必要的</li>
+<li>这解释了为什么PDE求解需要专门的预条件技术</li>
+</ul>
+</details>
+<p><strong>练习 19.5</strong>：混合精度策略设计
+为以下场景设计混合精度计算策略：</p>
+<ul>
+<li>求解大规模稠密线性系统 $\mathbf{A}\mathbf{x} = \mathbf{b}$，$n = 10000$</li>
+<li>$\mathbf{A}$ 存储需要 800MB（双精度）</li>
+<li>GPU显存限制为 4GB</li>
+<li>需要相对误差 $&lt; 10^{-10}$</li>
+</ul>
+<p>要求：最大化性能同时保证数值精度。</p>
+<p><em>提示</em>：考虑分块算法、迭代精化和选择性使用高精度。</p>
+<details>
+<summary>答案</summary>
+<p>优化的混合精度策略：</p>
+<ol>
+<li>
+<p><strong>存储方案</strong>：
+   - $\mathbf{A}$ 存储为FP32（400MB）
+   - 工作空间预留用于分块
+   - 关键中间量（如主元）保持FP64</p>
+</li>
+<li>
+<p><strong>计算流程</strong>：
+   ```</p>
+</li>
+<li>
+<p>FP32: LU分解（带部分选主元）</p>
+</li>
+<li>FP32: 前向/回代得到初始解 x₀</li>
+<li>FP64: 计算残差 r = b - Ax₀</li>
+<li>FP32: 求解修正方程 Az = r</li>
+<li>FP64: 更新 x₁ = x₀ + z</li>
+<li>
+<p>重复步骤3-5直到收敛
+   ```</p>
+</li>
+<li>
+<p><strong>分块优化</strong>：
+   - 块大小选择：平衡显存和计算效率
+   - 对角块用FP64，非对角块用FP32
+   - 使用面板分解减少通信</p>
+</li>
+<li>
+<p><strong>收敛保证</strong>：
+   - 监控相对残差（FP64计算）
+   - 如果停滞，切换到FP64重新分解
+   - 典型情况下2-3次迭代即可达到目标精度</p>
+</li>
+<li>
+<p><strong>性能估计</strong>：
+   - 相比纯FP64加速约1.8-2.2倍
+   - 内存使用减少约45%
+   - 数值精度满足要求</p>
+</li>
+</ol>
+</details>
+<p><strong>练习 19.6</strong>：分布式计算的数值稳定性
+在分布式环境中计算 $|\mathbf{A}|_F^2 = \sum_{i,j} a_{ij}^2$，其中矩阵 $\mathbf{A} \in \mathbb{R}^{n \times n}$ 按行分块存储在 $p$ 个处理器上。</p>
+<p>a) 分析朴素并行求和的误差累积
+b) 设计一个数值稳定的分布式算法
+c) 如何处理各处理器上的数据规模严重不平衡的情况？</p>
+<p><em>提示</em>：考虑树形归约和误差补偿技术。</p>
+<details>
+<summary>答案</summary>
+<p>a) <strong>朴素方法的误差分析</strong>：</p>
+<ul>
+<li>每个处理器局部误差：$O(\epsilon n^2/p)$</li>
+<li>归约过程误差：$O(\epsilon \log p)$</li>
+<li>最坏情况总误差：$O(\epsilon n^2)$</li>
+<li>当部分和数量级差异大时，可能出现灾难性抵消</li>
+</ul>
+<p>b) <strong>稳定的分布式算法</strong>：
+   ```</p>
+<ol>
+<li>
+<p>局部计算（每个处理器）：</p>
+<ul>
+<li>使用Kahan求和或成对求和</li>
+<li>计算局部和 S_i 及误差补偿项 C_i</li>
+</ul>
+</li>
+<li>
+<p>全局归约：</p>
+<ul>
+<li>使用确定性树形归约</li>
+<li>传输(S_i, C_i)对而非单一值</li>
+<li>在归约时继续使用补偿求和</li>
+</ul>
+</li>
+<li>
+<p>可选的两遍算法：</p>
+<ul>
+<li>第一遍：计算规模估计</li>
+<li>第二遍：使用缩放避免溢出
+   ```</li>
+</ul>
+</li>
+</ol>
+<p>c) <strong>负载不平衡的处理</strong>：</p>
+<ul>
+<li><strong>动态缩放</strong>：根据局部最大值选择缩放因子</li>
+<li><strong>分层归约</strong>：先在相似规模的处理器间归约</li>
+<li><strong>使用高精度累加器</strong>：如使用128位浮点数</li>
+<li><strong>自适应算法</strong>：
+     <code>if (max_local_sum / min_local_sum &gt; 10^6)
+         使用排序归约
+     else
+         使用标准树形归约</code></li>
+</ul>
+<p>关键研究方向：</p>
+<ul>
+<li>通信与精度的最优权衡</li>
+<li>异步算法的误差界</li>
+<li>硬件感知的归约策略</li>
+</ul>
+</details>
+<p><strong>练习 19.7</strong>：创新算法的稳定性分析
+最近提出的"随机递归最小二乘"(Randomized Recursive Least Squares, RRLS)算法通过随机采样和递归更新来求解超定系统。算法核心是：
+$$\mathbf{H}_{k+1} = \mathbf{H}_k - \frac{\mathbf{H}_k \mathbf{a}_k \mathbf{a}_k^T \mathbf{H}_k}{\mathbf{a}_k^T \mathbf{H}_k \mathbf{a}_k + \lambda}$$
+其中 $\mathbf{H}_k$ 逼近 $(\mathbf{A}^T\mathbf{A})^{-1}$，$\mathbf{a}_k$ 是随机采样的行。</p>
+<p>分析该算法的数值稳定性，特别是：
+a) 何时会出现数值崩溃？
+b) 如何改进算法以提高稳定性？
+c) 与经典方法相比的优劣？</p>
+<p><em>提示</em>：这是Sherman-Morrison公式的应用，考虑分母接近零的情况。</p>
+<details>
+<summary>答案</summary>
+<p>a) <strong>数值崩溃的条件</strong>：</p>
+<ol>
+<li>当 $\mathbf{a}_k^T \mathbf{H}_k \mathbf{a}_k + \lambda \approx 0$</li>
+<li>$\mathbf{H}_k$ 失去正定性</li>
+<li>舍入误差累积导致非对称性</li>
+<li>条件数增长失控</li>
+</ol>
+<p>b) <strong>稳定性改进方案</strong>：</p>
+<ol>
+<li>
+<p><strong>正定性维护</strong>：
+        <code>每隔m步：H = (H + H^T)/2
+        如果最小特征值 &lt; ε：H = H + εI</code></p>
+</li>
+<li>
+<p><strong>自适应正则化</strong>：
+        <code>λ_k = max(λ_min, τ·trace(H_k)/n)
+        其中τ ~ 10^(-12)</code></p>
+</li>
+<li>
+<p><strong>数值安全更新</strong>：
+        <code>计算 d = a_k^T H_k a_k + λ
+        if (d &lt; ε·‖H_k‖·‖a_k‖²)
+            跳过此次更新
+        else
+            执行Sherman-Morrison更新</code></p>
+</li>
+<li>
+<p><strong>周期性重启</strong>：
+        <code>if (cond(H_k) &gt; threshold)
+            使用最近的样本重新初始化</code></p>
+</li>
+</ol>
+<p>c) <strong>与经典方法比较</strong>：</p>
+<p><strong>优势</strong>：</p>
+<ul>
+<li>在线/增量更新能力</li>
+<li>内存需求 O(n²) vs O(mn)</li>
+<li>适合流数据处理</li>
+</ul>
+<p><strong>劣势</strong>：</p>
+<ul>
+<li>收敛速度依赖于采样</li>
+<li>数值稳定性较QR分解差</li>
+<li>需要精心的参数调节</li>
+</ul>
+<p><strong>适用场景</strong>：</p>
+<ul>
+<li>数据持续到达的在线学习</li>
+<li>存储受限的嵌入式系统</li>
+<li>可以容忍一定精度损失的应用</li>
+</ul>
+</details>
+<h2 id="7-gotchas">7. 常见陷阱与错误 (Gotchas)</h2>
+<h3 id="71">7.1 易被忽视的精度损失源</h3>
+<ol>
+<li>
+<p><strong>隐式的灾难性抵消</strong>
+   - 计算 $\mathbf{A}^T\mathbf{A}$ 形成法方程
+   - 两个接近矩阵的差：$\mathbf{A} - \mathbf{B}$
+   - 使用 $\log(1 + x)$ 而非 <code>log1p(x)</code></p>
+</li>
+<li>
+<p><strong>维度诅咒引起的数值问题</strong>
+   - 高维空间中的距离计算
+   - 协方差矩阵在高维下趋向奇异
+   - 随机投影的概率保证vs实际精度</p>
+</li>
+<li>
+<p><strong>并行化引入的不一致性</strong>
+   - 不同的求和顺序
+   - 非原子操作的竞争条件
+   - 缓存一致性导致的微小差异</p>
+</li>
+</ol>
+<h3 id="72">7.2 调试数值问题的系统方法</h3>
+<ol>
+<li>
+<p><strong>使用哨兵值</strong>：
+   <code>在关键位置插入已知的测试向量
+   验证它们是否被正确处理</code></p>
+</li>
+<li>
+<p><strong>条件数监控</strong>：
+   <code>定期估计和记录条件数
+   当条件数突变时触发警告</code></p>
+</li>
+<li>
+<p><strong>残差vs误差</strong>：
+   <code>小残差 ≠ 小误差（病态问题）
+   大残差 ≠ 大误差（良态问题的舍入）</code></p>
+</li>
+</ol>
+<h3 id="73">7.3 平台相关的陷阱</h3>
+<ol>
+<li>
+<p><strong>编译器优化的副作用</strong>
+   - <code>-ffast-math</code> 可能破坏IEEE合规性
+   - 循环向量化改变求和顺序
+   - 函数内联影响精度</p>
+</li>
+<li>
+<p><strong>硬件差异</strong>
+   - x86的80位扩展精度
+   - ARM的不同舍入模式
+   - GPU的非规范化数处理</p>
+</li>
+<li>
+<p><strong>库的不一致性</strong>
+   - 不同BLAS实现的数值差异
+   - MKL vs OpenBLAS vs参考实现
+   - 版本更新可能改变数值行为</p>
+</li>
+</ol>
+<h2 id="8">8. 最佳实践检查清单</h2>
+<h3 id="_3">算法设计阶段</h3>
+<ul>
+<li>[ ] <strong>条件数分析</strong></li>
+<li>估计问题的固有条件数</li>
+<li>识别病态的子问题</li>
+<li>
+<p>考虑重新表述以改善条件数</p>
+</li>
+<li>
+<p>[ ] <strong>算法选择</strong></p>
+</li>
+<li>优先选择后向稳定的算法</li>
+<li>考虑问题的特殊结构</li>
+<li>
+<p>评估精度vs效率的权衡</p>
+</li>
+<li>
+<p>[ ] <strong>误差预算</strong></p>
+</li>
+<li>分配各步骤的误差容限</li>
+<li>识别误差放大的关键步骤</li>
+<li>设计误差补偿机制</li>
+</ul>
+<h3 id="_4">实现阶段</h3>
+<ul>
+<li>[ ] <strong>数值安全编程</strong></li>
+<li>避免不必要的中间量计算（如 $\mathbf{A}^T\mathbf{A}$）</li>
+<li>使用稳定的基本操作（如 <code>hypot</code>, <code>log1p</code>）</li>
+<li>
+<p>实现适当的缩放策略</p>
+</li>
+<li>
+<p>[ ] <strong>精度管理</strong></p>
+</li>
+<li>关键计算使用高精度</li>
+<li>实现混合精度策略</li>
+<li>
+<p>保留误差估计信息</p>
+</li>
+<li>
+<p>[ ] <strong>鲁棒性增强</strong></p>
+</li>
+<li>添加数值健康检查</li>
+<li>实现优雅的降级策略</li>
+<li>提供诊断输出选项</li>
+</ul>
+<h3 id="_5">测试阶段</h3>
+<ul>
+<li>[ ] <strong>数值测试套件</strong></li>
+<li>包含病态测试用例</li>
+<li>测试极端输入（很大/很小的数）</li>
+<li>
+<p>验证误差界</p>
+</li>
+<li>
+<p>[ ] <strong>跨平台验证</strong></p>
+</li>
+<li>测试不同硬件架构</li>
+<li>验证不同编译选项</li>
+<li>
+<p>检查并行化的数值一致性</p>
+</li>
+<li>
+<p>[ ] <strong>性能vs精度权衡</strong></p>
+</li>
+<li>基准测试不同精度级别</li>
+<li>评估算法的精度退化曲线</li>
+<li>确定最优工作点</li>
+</ul>
+<h3 id="_6">部署阶段</h3>
+<ul>
+<li>[ ] <strong>监控策略</strong></li>
+<li>实时条件数估计</li>
+<li>异常检测机制</li>
+<li>
+<p>性能退化预警</p>
+</li>
+<li>
+<p>[ ] <strong>文档要求</strong></p>
+</li>
+<li>明确数值假设和限制</li>
+<li>提供精度保证说明</li>
+<li>
+<p>包含故障排除指南</p>
+</li>
+<li>
+<p>[ ] <strong>持续改进</strong></p>
+</li>
+<li>收集数值失败案例</li>
+<li>更新测试套件</li>
+<li>优化关键数值核心</li>
+</ul>
+<h3 id="_7">特定场景补充</h3>
+<p><strong>大规模计算</strong></p>
+<ul>
+<li>[ ] 考虑通信引起的误差</li>
+<li>[ ] 实现检查点以应对数值失败</li>
+<li>[ ] 使用分层算法减少误差累积</li>
+</ul>
+<p><strong>实时系统</strong></p>
+<ul>
+<li>[ ] 固定迭代次数避免不确定性</li>
+<li>[ ] 预计算条件数阈值</li>
+<li>[ ] 实现快速但略损精度的备选方案</li>
+</ul>
+<p><strong>机器学习应用</strong></p>
+<ul>
+<li>[ ] 梯度计算的数值稳定性</li>
+<li>[ ] 防止权重更新中的数值崩溃</li>
+<li>[ ] 批归一化等技术的数值考虑</li>
+</ul>
+<h2 id="_8">延伸阅读与研究方向</h2>
+<ol>
+<li><strong>自适应精度算法</strong>：根据问题条件数动态调整工作精度</li>
+<li><strong>概率数值方法</strong>：将舍入误差建模为随机变量</li>
+<li><strong>形式化验证</strong>：使用定理证明器验证数值算法</li>
+<li><strong>量子纠错码启发的数值方法</strong>：借鉴量子计算的错误处理</li>
+<li><strong>神经网络辅助的稳定性预测</strong>：使用ML预测数值失败模式</li>
+</ol>
+<p>本附录提供了数值稳定性的实用指南。记住：在数值计算中，正确的算法只是起点，稳定的实现才是关键。当遇到数值问题时，系统地应用本附录的原则和技术，通常能找到解决方案。</p>
+            </article>
+            
+            <nav class="page-nav"><a href="./chapter18.html" class="nav-link prev">← 第18章：量子启发的矩阵算法</a><a href="./chapter20.html" class="nav-link next">附录B：性能调优检查清单 →</a></nav>
+        </main>
+    </div>
+</body>
+</html>

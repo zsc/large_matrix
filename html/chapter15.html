@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第15章：实时推荐的增量矩阵方法</title>
+    <link rel="stylesheet" href="./assets/style.css">
+    <link rel="stylesheet" href="./assets/highlight.css">
+    <script src="./assets/script.js" defer></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$']],
+                displayMath: [['$$', '$$']],
+                processEscapes: false,
+                packages: {'[+]': ['noerrors']}
+            },
+            options: {
+                ignoreHtmlClass: 'tex2jax_ignore',
+                processHtmlClass: 'tex2jax_process'
+            },
+            loader: {
+                load: ['[tex]/noerrors']
+            }
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <nav id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <h3>目录</h3>
+                <button id="sidebar-toggle" class="sidebar-toggle">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+            <ul class="nav-list"><li class=""><a href="./index.html">高级大规模矩阵计算教程</a></li><li class=""><a href="./chapter1.html">第1章：二阶优化的统一框架</a></li><li class=""><a href="./chapter2.html">第2章：Hessian近似的艺术</a></li><li class=""><a href="./chapter3.html">第3章：结构化二阶方法</a></li><li class=""><a href="./chapter4.html">第4章：增量Hessian计算</a></li><li class=""><a href="./chapter5.html">第5章：Schur补的妙用</a></li><li class=""><a href="./chapter6.html">第6章：矩阵Sketching技术</a></li><li class=""><a href="./chapter7.html">第7章：随机化数值线性代数</a></li><li class=""><a href="./chapter8.html">第8章：分布式矩阵运算</a></li><li class=""><a href="./chapter9.html">第9章：异步优化的数学基础</a></li><li class=""><a href="./chapter10.html">第10章：Riemannian优化基础</a></li><li class=""><a href="./chapter11.html">第11章：流形预条件技术</a></li><li class=""><a href="./chapter12.html">第12章：结构化矩阵的快速算法</a></li><li class=""><a href="./chapter13.html">第13章：动态低秩近似</a></li><li class=""><a href="./chapter14.html">第14章：大规模协同过滤的矩阵技术</a></li><li class="active"><a href="./chapter15.html">第15章：实时推荐的增量矩阵方法</a></li><li class=""><a href="./chapter16.html">第16章：多模态推荐的张量分解</a></li><li class=""><a href="./chapter17.html">第17章：隐式微分与双层优化</a></li><li class=""><a href="./chapter18.html">第18章：量子启发的矩阵算法</a></li><li class=""><a href="./chapter19.html">附录A：数值稳定性速查表</a></li><li class=""><a href="./chapter20.html">附录B：性能调优检查清单</a></li><li class=""><a href="./chapter21.html">附录C：常用矩阵恒等式</a></li><li class=""><a href="./CLAUDE.html">高级大规模矩阵计算教程项目说明</a></li><li class=""><a href="./README.html">高级大规模矩阵计算教程</a></li></ul>
+        </nav>
+        
+        <main class="content">
+            <article>
+                <h1 id="15">第15章：实时推荐的增量矩阵方法</h1>
+<p>在现代推荐系统中，用户行为数据以流的形式不断产生，系统需要实时响应并更新推荐结果。传统的批处理矩阵分解方法已无法满足毫秒级延迟的需求。本章深入探讨如何设计高效的增量算法，在保证推荐质量的同时实现快速更新。我们将分析在线学习的理论保证、数值稳定性挑战，以及工程实现的最佳实践。</p>
+<h2 id="151">15.1 在线矩阵分解的遗忘机制</h2>
+<h3 id="1511">15.1.1 时间衰减的数学建模</h3>
+<p>在实时推荐场景中，用户兴趣随时间演化，旧数据的重要性逐渐降低。我们需要设计合理的遗忘机制来平衡历史信息与新鲜度。遗忘机制的设计直接影响模型对趋势变化的敏感度和稳定性。</p>
+<p><strong>指数遗忘模型</strong></p>
+<p>考虑矩阵分解的目标函数：
+$$\mathcal{L}_t = \sum_{(i,j) \in \Omega_t} w_{ij}^{(t)} (r_{ij} - \mathbf{u}_i^T \mathbf{v}_j)^2 + \lambda (|\mathbf{U}|_F^2 + |\mathbf{V}|_F^2)$$
+其中时间权重 $w_{ij}^{(t)} = \exp(-\beta(t - t_{ij}))$，$t_{ij}$ 是观测时间，$\beta$ 控制遗忘速率。</p>
+<p>指数遗忘的优势在于：</p>
+<ul>
+<li>平滑的权重衰减，避免突变</li>
+<li>参数 $\beta$ 具有明确的物理意义（半衰期 $t_{1/2} = \ln(2)/\beta$）</li>
+<li>与在线学习理论中的指数加权平均（EWA）相联系</li>
+<li>满足时间一致性：$w_{ij}^{(t+\Delta t)} = w_{ij}^{(t)} \cdot e^{-\beta\Delta t}$</li>
+</ul>
+<p><strong>数学性质分析</strong></p>
+<p>指数遗忘的有效样本量（Effective Sample Size, ESS）：
+$$\text{ESS}_t = \frac{\left(\sum_{s=1}^t e^{-\beta(t-s)}\right)^2}{\sum_{s=1}^t e^{-2\beta(t-s)}} \approx \frac{1}{2\beta}$$
+这提供了选择 $\beta$ 的理论指导：若希望有效利用约 $N$ 个时间单位的历史数据，应设置 $\beta \approx 1/(2N)$。</p>
+<p><strong>滑动窗口方法</strong></p>
+<p>另一种方法是只考虑最近 $W$ 个时间单位的数据：
+$$w_{ij}^{(t)} = \begin{cases} 
+1 &amp; \text{if } t - t_{ij} \leq W \
+0 &amp; \text{otherwise}
+\end{cases}$$
+这种硬截断虽然简单，但可能导致信息突变。实践中常用软窗口变体：
+$$w_{ij}^{(t)} = \sigma\left(\frac{W - (t - t_{ij})}{\tau}\right)$$
+其中 $\sigma$ 是sigmoid函数，$\tau$ 控制过渡的平滑度。</p>
+<p><strong>分段线性遗忘</strong></p>
+<p>介于指数和窗口之间的折中方案：
+$$w_{ij}^{(t)} = \begin{cases}
+1 &amp; \text{if } t - t_{ij} \leq W_1 \
+1 - \alpha(t - t_{ij} - W_1)/(W_2 - W_1) &amp; \text{if } W_1 &lt; t - t_{ij} \leq W_2 \
+1 - \alpha &amp; \text{if } t - t_{ij} &gt; W_2
+\end{cases}$$
+这种方法保留近期数据的完整权重，对中期数据线性衰减，对远期数据保持最小权重。</p>
+<p><strong>自适应遗忘模型</strong></p>
+<p>更高级的方法是让遗忘率随数据特性动态调整：
+$$\beta_{ij}(t) = \beta_0 \cdot f(\text{volatility}_i, \text{popularity}_j, \text{sparsity}_{ij})$$
+其中：</p>
+<ul>
+<li>$\text{volatility}_i$ 衡量用户兴趣的变化速度</li>
+<li>$\text{popularity}_j$ 反映物品的流行度趋势</li>
+<li>$\text{sparsity}_{ij}$ 考虑数据稀疏性</li>
+</ul>
+<p><strong>波动性估计</strong></p>
+<p>用户兴趣波动性可通过滑动窗口内的评分方差估计：
+$$\text{volatility}_i(t) = \sqrt{\frac{1}{|\mathcal{W}_i|} \sum_{(j,s) \in \mathcal{W}_i} (r_{ij}^{(s)} - \bar{r}_i^{(t)})^2}$$
+其中 $\mathcal{W}_i$ 是用户 $i$ 在时间窗口内的交互集合。</p>
+<p><strong>多尺度遗忘</strong></p>
+<p>实际系统中，不同时间尺度的模式共存：
+$$w_{ij}^{(t)} = \sum_{k=1}^K \alpha_k \exp(-\beta_k(t - t_{ij}))$$
+其中 $\sum_k \alpha_k = 1$，不同的 $\beta_k$ 对应不同时间尺度（小时、天、周、月）。</p>
+<h3 id="1512-sgd">15.1.2 增量SGD的收敛性分析</h3>
+<p>对于流式数据 $(i_t, j_t, r_t)$，标准SGD更新为：
+$$\mathbf{u}_{i_t} \leftarrow \mathbf{u}_{i_t} - \eta_t \nabla_{\mathbf{u}_{i_t}} \ell_t$$
+$$\mathbf{v}_{j_t} \leftarrow \mathbf{v}_{j_t} - \eta_t \nabla_{\mathbf{v}_{j_t}} \ell_t$$
+其中 $\ell_t = (r_t - \mathbf{u}_{i_t}^T \mathbf{v}_{j_t})^2 + \lambda(|\mathbf{u}_{i_t}|^2 + |\mathbf{v}_{j_t}|^2)$。</p>
+<p><strong>收敛性定理</strong>（非凸情况）</p>
+<p>在以下条件下：</p>
+<ol>
+<li>损失函数 $\ell_t$ 是 $L$-光滑的</li>
+<li>梯度有界：$|\nabla \ell_t| \leq G$</li>
+<li>学习率满足：$\eta_t = \eta_0/\sqrt{t}$</li>
+</ol>
+<p>则增量SGD收敛到稳定点的速率为：
+$$\mathbb{E}\left[\frac{1}{T}\sum_{t=1}^T |\nabla \mathcal{L}_t|^2\right] = O\left(\frac{1}{\sqrt{T}}\right)$$
+<strong>改进的收敛性分析</strong></p>
+<p>考虑矩阵分解的特殊结构，可以得到更紧的界。定义 Lyapunov 函数：
+$$V_t = |\mathbf{U}_t - \mathbf{U}^*|_F^2 + |\mathbf{V}_t - \mathbf{V}^*|_F^2$$
+在适当的步长条件下：
+$$\mathbb{E}[V_T] \leq \frac{V_0}{T^\alpha} + O\left(\frac{\sigma^2}{T^{1-\alpha}}\right)$$
+其中 $\alpha \in (0.5, 1)$ 取决于问题的强凸性程度，$\sigma^2$ 是噪声方差。</p>
+<p><strong>带遗忘的SGD分析</strong></p>
+<p>考虑指数遗忘权重，修正的更新规则变为：
+$$\mathbf{u}_{i_t} \leftarrow (1-\gamma)\mathbf{u}_{i_t} - \eta_t e^{-\beta(t-t_{ij})} \nabla_{\mathbf{u}_{i_t}} \ell_t$$
+其中 $\gamma$ 是衰减因子，防止历史信息完全主导。</p>
+<p><strong>追踪误差分析</strong></p>
+<p>在非平稳环境下，定义追踪误差：
+$$\text{TE}_T = \frac{1}{T}\sum_{t=1}^T |\mathbf{U}_t\mathbf{V}_t^T - \mathbf{M}_t^*|_F^2$$
+其中 $\mathbf{M}_t^*$ 是时刻 $t$ 的真实矩阵。可以证明：
+$$\mathbb{E}[\text{TE}_T] \leq O\left(\frac{1}{\sqrt{T}}\right) + O(\beta) + O(\Delta_T)$$
+其中 $\Delta_T$ 衡量环境变化速度。这表明遗忘率 $\beta$ 需要在适应性和稳定性之间权衡。</p>
+<p><strong>方差减少技术</strong></p>
+<p>为了加速收敛，可以使用方差减少的SGD变体：</p>
+<ol>
+<li>
+<p><strong>SVRG-style更新</strong>：
+$$\mathbf{g}_t = \nabla \ell_t(\mathbf{u}_t) - \nabla \ell_t(\tilde{\mathbf{u}}) + \tilde{\mathbf{g}}$$
+其中 $\tilde{\mathbf{u}}$ 是快照点，$\tilde{\mathbf{g}}$ 是在快照点的完整梯度。</p>
+</li>
+<li>
+<p><strong>动量方法</strong>：
+$$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1-\beta_1)\nabla \ell_t$$
+   $$\mathbf{u}_t = \mathbf{u}_{t-1} - \eta_t \mathbf{m}_t$$
+<strong>关键研究方向</strong>：</p>
+</li>
+</ol>
+<ul>
+<li>非凸优化的在线regret界（特别是矩阵分解的低秩约束）</li>
+<li>自适应学习率（AdaGrad、Adam）在矩阵分解中的理论保证</li>
+<li>稀疏数据流下的样本复杂度</li>
+<li>时变环境下的追踪误差（tracking error）分析</li>
+<li>分布式环境下的通信复杂度优化</li>
+<li>隐私保护约束下的收敛性（差分隐私SGD）</li>
+</ul>
+<h3 id="1513">15.1.3 动态正则化策略</h3>
+<p>随着数据累积，不同用户/物品的样本数差异巨大。动态正则化可以解决这个问题：
+$$\lambda_i^{(t)} = \lambda_0 / \sqrt{n_i^{(t)} + 1}$$
+其中 $n_i^{(t)}$ 是用户 $i$ 到时刻 $t$ 的交互次数。</p>
+<p><strong>理论基础</strong></p>
+<p>这种设计基于贝叶斯观点：</p>
+<ul>
+<li>先验：$\mathbf{u}_i \sim \mathcal{N}(0, \sigma^2\mathbf{I})$</li>
+<li>后验精度随观测数增加：$\text{precision} \propto n_i^{(t)}$</li>
+<li>等价于自适应正则化</li>
+</ul>
+<p>更精确地，后验分布为：
+$$p(\mathbf{u}_i | \mathcal{D}_i) \propto \exp\left(-\frac{1}{2\sigma^2}|\mathbf{u}_i|^2 - \frac{1}{2\sigma_r^2}\sum_{j \in \mathcal{D}_i}(r_{ij} - \mathbf{u}_i^T\mathbf{v}_j)^2\right)$$
+<strong>泛化误差界</strong></p>
+<p>动态正则化的泛化性能可以通过PAC-Bayes理论分析：
+$$\mathbb{E}[\mathcal{L}_{\text{test}}] \leq \mathcal{L}_{\text{train}} + O\left(\sqrt{\frac{\text{KL}(q|p) + \log(1/\delta)}{n}}\right)$$
+其中 KL 散度项受正则化控制。</p>
+<p><strong>多尺度正则化</strong></p>
+<p>考虑不同时间尺度的行为：
+$$\lambda_i^{(t)} = \lambda_{\text{long}} / \sqrt{n_i^{\text{all}}} + \lambda_{\text{short}} / \sqrt{n_i^{\text{recent}}}$$
+其中：</p>
+<ul>
+<li>$n_i^{\text{all}}$ 是历史总交互数</li>
+<li>$n_i^{\text{recent}}$ 是近期（如最近7天）交互数</li>
+</ul>
+<p><strong>信息论视角</strong></p>
+<p>从最小描述长度（MDL）原理，最优正则化应平衡模型复杂度和数据拟合：
+$$\text{MDL} = -\log p(\mathcal{D}|\mathbf{u}_i) + \text{KL}(\mathbf{u}_i | \mathbf{u}_{\text{prior}})$$
+这导出自适应正则化：
+$$\lambda_i^{(t)} = \frac{\sigma_r^2}{\sigma^2} \cdot \frac{1}{n_i^{(t)}}$$
+<strong>稀疏感知正则化</strong></p>
+<p>对于极稀疏用户，标准正则化可能过强。一种改进是：
+$$\lambda_i^{(t)} = \lambda_0 \cdot \left(\frac{n_{\text{median}}}{n_i^{(t)} + n_{\text{median}}}\right)^\alpha$$
+其中 $n_{\text{median}}$ 是中位数交互次数，$\alpha \in [0.5, 1]$ 控制调整强度。</p>
+<p><strong>数值稳定性考虑</strong>：</p>
+<ul>
+<li>防止除零错误：使用 $n_i^{(t)} + \epsilon$，$\epsilon \sim 0.1$</li>
+<li>正则化参数的上下界限制：$\lambda_{\min} \leq \lambda_i^{(t)} \leq \lambda_{\max}$</li>
+<li>增量统计量的精确维护：使用Welford算法计算在线均值和方差</li>
+<li>数值下溢处理：对极小的正则化值使用对数空间计算</li>
+<li>条件数监控：确保 $\kappa(\mathbf{A}_i) &lt; \kappa_{\max}$</li>
+</ul>
+<h3 id="1514">15.1.4 混合遗忘策略</h3>
+<p>实践中，单一遗忘机制往往不够灵活。混合策略结合多种方法的优势：</p>
+<p><strong>分层遗忘模型</strong>
+$$w_{ij}^{(t)} = \alpha \cdot w_{\text{exp}}^{(t)} + (1-\alpha) \cdot w_{\text{window}}^{(t)}$$
+其中 $\alpha$ 可以自适应调整：
+$$\alpha(t) = \sigma\left(\frac{\text{MSE}_{\text{exp}} - \text{MSE}_{\text{window}}}{\tau}\right)$$
+<strong>在线模型选择</strong></p>
+<p>使用专家算法（Multiplicative Weights）动态选择最佳遗忘策略：
+$$p_k^{(t+1)} = \frac{p_k^{(t)} \exp(-\eta L_k^{(t)})}{\sum_{k'} p_{k'}^{(t)} \exp(-\eta L_{k'}^{(t)})}$$
+其中 $L_k^{(t)}$ 是策略 $k$ 的累积损失，$p_k^{(t)}$ 是选择概率。</p>
+<p><strong>事件驱动遗忘</strong></p>
+<p>某些事件（如节假日、促销）会导致用户行为突变：
+$$\beta(t) = \begin{cases}
+\beta_{\text{normal}} &amp; \text{常规时期} \
+\beta_{\text{fast}} &amp; \text{事件期间} \
+\beta_{\text{recovery}} &amp; \text{事件后恢复期}
+\end{cases}$$
+<strong>变点检测算法</strong></p>
+<p>使用贝叶斯在线变点检测（BOCD）：
+$$p(r_t | r_{1:t-1}) = \sum_{\tau} p(r_t | r_{\tau:t-1}) p(\tau | r_{1:t-1})$$
+其中 $\tau$ 是最近变点的位置。</p>
+<p><strong>研究挑战</strong>：</p>
+<ul>
+<li>自动检测行为模式变化点</li>
+<li>多用户群体的差异化遗忘策略</li>
+<li>遗忘机制与推荐多样性的关系</li>
+<li>对抗性环境下的鲁棒遗忘</li>
+</ul>
+<h3 id="1515">15.1.5 理论保证与优化界</h3>
+<p><strong>竞争比分析</strong></p>
+<p>定义在线算法的竞争比：
+$$\rho = \sup_{\text{sequence}} \frac{\text{ALG}_{\text{online}}}{\text{OPT}_{\text{offline}}}$$
+对于指数遗忘的在线矩阵分解：
+$$\rho \leq 1 + O(\sqrt{\beta T})$$
+这表明遗忘率 $\beta$ 不能太大。</p>
+<p><strong>Regret界</strong></p>
+<p>考虑与最佳固定遗忘率的比较：
+$$R_T = \sum_{t=1}^T \ell_t^{\beta_t} - \min_{\beta^*} \sum_{t=1}^T \ell_t^{\beta^*}$$
+使用在线镜像下降可得：
+$$R_T \leq O(\sqrt{T \log K})$$
+其中 $K$ 是候选遗忘率的数量。</p>
+<p><strong>样本复杂度</strong></p>
+<p>达到 $\epsilon$-近似解需要的样本数：
+$$m = O\left(\frac{r(n_1 + n_2)\log(1/\epsilon)}{\epsilon^2} \cdot \frac{1}{1-e^{-\beta T}}\right)$$
+遗忘机制增加了有效样本复杂度。</p>
+<p><strong>计算-统计权衡</strong></p>
+<p>定义计算预算约束下的近似误差：
+$$\text{Error}(T, B) = \underbrace{O(1/\sqrt{T})}_{\text{统计误差}} + \underbrace{O(B^{-\gamma})}_{\text{计算误差}}$$
+其中 $B$ 是计算预算，$\gamma$ 取决于算法效率。</p>
+<h2 id="152">15.2 用户/物品嵌入的快速更新</h2>
+<h3 id="1521-sherman-morrison">15.2.1 秩一更新的Sherman-Morrison公式</h3>
+<p>当新增一个评分时，可以利用秩一更新避免完全重新计算。这在实时系统中至关重要，将更新复杂度从 $O(r^3)$ 降至 $O(r^2)$。</p>
+<p>给定 $\mathbf{A} = \mathbf{X}^T\mathbf{X} + \lambda\mathbf{I}$，新增样本 $(\mathbf{x}, y)$ 后：
+$$\mathbf{A}' = \mathbf{A} + \mathbf{x}\mathbf{x}^T$$
+利用Sherman-Morrison公式：
+$$(\mathbf{A}')^{-1} = \mathbf{A}^{-1} - \frac{\mathbf{A}^{-1}\mathbf{x}\mathbf{x}^T\mathbf{A}^{-1}}{1 + \mathbf{x}^T\mathbf{A}^{-1}\mathbf{x}}$$
+<strong>数值稳定性增强</strong></p>
+<p>标准Sherman-Morrison公式在 $1 + \mathbf{x}^T\mathbf{A}^{-1}\mathbf{x} \approx 0$ 时不稳定。稳定版本：
+$$(\mathbf{A}')^{-1} = \mathbf{A}^{-1} - \frac{\mathbf{u}\mathbf{u}^T}{1 + |\mathbf{u}|^2}$$
+其中 $\mathbf{u} = \mathbf{A}^{-1/2}\mathbf{x}$</p>
+<p><strong>基于Cholesky分解的稳定实现</strong></p>
+<p>维护Cholesky分解 $\mathbf{A} = \mathbf{L}\mathbf{L}^T$，更新过程：</p>
+<ol>
+<li>求解 $\mathbf{L}\mathbf{w} = \mathbf{x}$，得到 $\mathbf{w}$</li>
+<li>计算 $\alpha = \sqrt{1 + |\mathbf{w}|^2}$</li>
+<li>更新 $\mathbf{L}' = \begin{bmatrix} \mathbf{L} &amp; \mathbf{0} \ \mathbf{w}^T &amp; \alpha \end{bmatrix}$</li>
+</ol>
+<p>这种方法数值稳定且保持正定性。</p>
+<p><strong>删除操作的处理</strong></p>
+<p>当需要删除旧数据（遗忘）时，使用减法版本：
+$$(\mathbf{A} - \mathbf{x}\mathbf{x}^T)^{-1} = \mathbf{A}^{-1} + \frac{\mathbf{A}^{-1}\mathbf{x}\mathbf{x}^T\mathbf{A}^{-1}}{1 - \mathbf{x}^T\mathbf{A}^{-1}\mathbf{x}}$$
+注意：需要检查 $\mathbf{x}^T\mathbf{A}^{-1}\mathbf{x} &lt; 1$ 以保证正定性。</p>
+<p><strong>加权更新扩展</strong></p>
+<p>对于带时间权重的更新：
+$$\mathbf{A}' = \mathbf{A} + w_t \mathbf{x}\mathbf{x}^T$$
+修正的Sherman-Morrison公式：
+$$(\mathbf{A}')^{-1} = \mathbf{A}^{-1} - \frac{w_t \mathbf{A}^{-1}\mathbf{x}\mathbf{x}^T\mathbf{A}^{-1}}{1 + w_t \mathbf{x}^T\mathbf{A}^{-1}\mathbf{x}}$$
+<strong>应用于矩阵分解</strong></p>
+<p>对于用户嵌入更新：
+$$\mathbf{u}_i = (\mathbf{V}_{\Omega_i}^T\mathbf{V}_{\Omega_i} + \lambda\mathbf{I})^{-1}\mathbf{V}_{\Omega_i}^T\mathbf{r}_i$$
+新增评分 $(i,j,r_{ij})$ 后，只需更新：</p>
+<ol>
+<li>$\mathbf{A}_i' = \mathbf{A}_i + \mathbf{v}_j\mathbf{v}_j^T$</li>
+<li>$\mathbf{b}_i' = \mathbf{b}_i + r_{ij}\mathbf{v}_j$</li>
+<li>$\mathbf{u}_i' = (\mathbf{A}_i')^{-1}\mathbf{b}_i'$</li>
+</ol>
+<p><strong>误差累积分析</strong></p>
+<p>经过 $k$ 次更新后的误差界：
+$$|(\mathbf{A}_k)^{-1} - (\mathbf{A}_k)^{-1}_{\text{exact}}|_F \leq k \epsilon_{\text{machine}} \kappa(\mathbf{A}_0)^2$$
+建议每 $O(1/\epsilon_{\text{machine}})$ 次更新后重新计算精确逆。</p>
+<p><strong>缓存友好的实现</strong></p>
+<p>为了优化缓存性能，使用分块更新：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">BlockSize</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">32</span><span class="w">  </span><span class="o">//</span><span class="w"> </span><span class="n">L1</span><span class="w"> </span><span class="n">cache</span><span class="w"> </span><span class="n">line</span>
+<span class="k">for</span><span class="w"> </span><span class="n">block</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="nl">blocks</span><span class="p">:</span>
+<span class="w">    </span><span class="n">prefetch</span><span class="p">(</span><span class="n">A_inv</span><span class="o">[</span><span class="n">block</span><span class="o">]</span><span class="p">)</span>
+<span class="w">    </span><span class="k">update</span><span class="p">(</span><span class="n">A_inv</span><span class="o">[</span><span class="n">block</span><span class="o">]</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="1522">15.2.2 块更新与并行化</h3>
+<p>对于批量更新，Woodbury矩阵恒等式提供了高效方案：
+$$(\mathbf{A} + \mathbf{U}\mathbf{C}\mathbf{V}^T)^{-1} = \mathbf{A}^{-1} - \mathbf{A}^{-1}\mathbf{U}(\mathbf{C}^{-1} + \mathbf{V}^T\mathbf{A}^{-1}\mathbf{U})^{-1}\mathbf{V}^T\mathbf{A}^{-1}$$
+<strong>批量评分更新</strong></p>
+<p>当同时到达 $k$ 个新评分时：</p>
+<ul>
+<li>$\mathbf{U} = [\mathbf{v}_{j_1}, ..., \mathbf{v}_{j_k}]$</li>
+<li>$\mathbf{C} = \text{diag}(1, ..., 1)$</li>
+<li>$\mathbf{V} = \mathbf{U}$</li>
+</ul>
+<p>复杂度：$O(r^2k + k^3)$，当 $k \ll r$ 时高效。</p>
+<p><strong>优化的Woodbury实现</strong></p>
+<p>为避免数值不稳定，使用QR分解：</p>
+<ol>
+<li>计算 $\mathbf{Q}\mathbf{R} = \mathbf{A}^{-1/2}\mathbf{U}$</li>
+<li>形成 $\mathbf{S} = \mathbf{C}^{-1} + \mathbf{R}^T\mathbf{R}$</li>
+<li>Cholesky分解 $\mathbf{S} = \mathbf{L}_S\mathbf{L}_S^T$</li>
+<li>更新 $(\mathbf{A}')^{-1} = \mathbf{A}^{-1} - \mathbf{Q}(\mathbf{L}_S^{-T}\mathbf{L}_S^{-1})\mathbf{Q}^T$</li>
+</ol>
+<p><strong>并行化策略</strong></p>
+<ol>
+<li>
+<p><strong>用户级并行</strong>：不同用户的嵌入可独立更新
+   <code>parallel for each user i:
+       update A_i and u_i</code></p>
+</li>
+<li>
+<p><strong>批内并行</strong>：利用矩阵乘法的并行性
+   - BLAS Level 3操作：<code>gemm</code>, <code>syrk</code>
+   - GPU加速：适合大批量更新</p>
+</li>
+<li>
+<p><strong>流水线并行</strong>：
+   - Stage 1: 收集更新，形成批
+   - Stage 2: 计算矩阵更新
+   - Stage 3: 更新嵌入向量</p>
+</li>
+</ol>
+<p><strong>细粒度并行优化</strong></p>
+<p>使用原子操作避免锁：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">atomic_add</span><span class="p">(</span><span class="n">A</span><span class="o">[</span><span class="n">i,j</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">delta</span><span class="p">)</span>
+<span class="n">memory_fence</span><span class="p">()</span>
+<span class="n">atomic_add</span><span class="p">(</span><span class="n">b</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">v</span><span class="o">[</span><span class="n">j</span><span class="o">]</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>NUMA感知的数据布局</strong></p>
+<p>在多处理器系统中：</p>
+<div class="codehilite"><pre><span></span><code>UserData {
+    A_inv: aligned to NUMA node
+    embeddings: interleaved across nodes
+    update_queue: per-node queue
+}
+</code></pre></div>
+
+<p><strong>批大小的自适应调整</strong></p>
+<p>根据系统负载动态调整：
+$$k_{\text{opt}} = \arg\min_k \left(\frac{T_{\text{collect}}(k)}{k} + T_{\text{compute}}(k)\right)$$
+其中：</p>
+<ul>
+<li>$T_{\text{collect}}(k)$ 是收集 $k$ 个更新的时间</li>
+<li>$T_{\text{compute}}(k) = O(r^2k + k^3)$ 是计算时间</li>
+</ul>
+<p><strong>实现要点</strong>：</p>
+<ul>
+<li>缓存 $\mathbf{A}^{-1}$ 的分解形式（如Cholesky）</li>
+<li>异步更新的一致性保证：使用版本控制</li>
+<li>数值误差累积的定期修正：每 $N$ 次更新后重新计算</li>
+<li>内存局部性优化：按用户分组存储相关矩阵</li>
+<li>使用内存池减少分配开销</li>
+</ul>
+<h3 id="1523">15.2.3 懒惰求值与缓存策略</h3>
+<p>不是所有嵌入都需要实时更新。懒惰求值策略大幅减少计算量：</p>
+<p><strong>三级更新策略</strong></p>
+<ol>
+<li>
+<p><strong>立即更新</strong>（热用户）：
+   - 活跃用户（最近1小时有交互）
+   - 高价值用户（VIP、付费用户）
+   - 更新延迟 &lt; 100ms</p>
+</li>
+<li>
+<p><strong>延迟更新</strong>（温用户）：
+   - 周期性活跃用户
+   - 批量聚合后更新
+   - 更新延迟 &lt; 1分钟</p>
+</li>
+<li>
+<p><strong>懒惰更新</strong>（冷用户）：
+   - 低活跃用户
+   - 仅在查询时更新
+   - 可接受陈旧结果</p>
+</li>
+</ol>
+<p><strong>智能缓存管理</strong></p>
+<div class="codehilite"><pre><span></span><code>CacheEntry {
+    embedding: Vector
+    last_update: Timestamp
+    pending_updates: Queue&lt;Update&gt;
+    access_count: int
+    update_cost: float
+}
+</code></pre></div>
+
+<p><strong>更新决策函数</strong>：
+$$\text{should_update} = \frac{\text{staleness} \times \text{importance}}{\text{update_cost}} &gt; \theta$$
+其中：</p>
+<ul>
+<li>$\text{staleness} = t_{\text{now}} - t_{\text{last_update}}$</li>
+<li>$\text{importance} = f(\text{access_frequency}, \text{user_value})$</li>
+<li>$\text{update_cost}$ 考虑计算复杂度和当前负载</li>
+</ul>
+<p><strong>成本模型</strong></p>
+<p>更精确的更新成本估计：
+$$\text{cost}(i) = c_{\text{compute}} \cdot |\Omega_i| + c_{\text{memory}} \cdot r^2 + c_{\text{sync}}$$
+其中：</p>
+<ul>
+<li>$c_{\text{compute}}$ 是每个样本的计算成本</li>
+<li>$c_{\text{memory}}$ 是内存访问成本</li>
+<li>$c_{\text{sync}}$ 是同步开销</li>
+</ul>
+<p><strong>LRU-K缓存策略</strong></p>
+<p>考虑访问模式的时间局部性：</p>
+<div class="codehilite"><pre><span></span><code>access_score(i) = Σ_{k=1}^K w_k * time_since_kth_access(i)
+evict_score(i) = staleness(i) / access_score(i)
+</code></pre></div>
+
+<p><strong>版本化缓存</strong></p>
+<p>支持多版本读取，避免更新阻塞查询：</p>
+<div class="codehilite"><pre><span></span><code>VersionedEmbedding {
+    versions: RingBuffer&lt;(Version, Embedding)&gt;
+    current_version: AtomicInt
+}
+</code></pre></div>
+
+<p><strong>近似更新理论</strong></p>
+<p>定义近似因子 $\alpha$：
+$$\mathbf{u}_{\text{approx}} = \alpha \mathbf{u}_{\text{old}} + (1-\alpha) \mathbf{u}_{\text{increment}}$$
+误差界：
+$$|\mathbf{u}_{\text{approx}} - \mathbf{u}_{\text{exact}}| \leq \frac{\alpha}{1-\alpha} \cdot |\Delta \mathbf{u}|$$
+<strong>分层缓存架构</strong></p>
+<ol>
+<li><strong>L1缓存</strong>：最热的嵌入，完全在内存</li>
+<li><strong>L2缓存</strong>：SSD存储，毫秒级访问</li>
+<li><strong>L3存储</strong>：分布式存储，用于冷数据</li>
+</ol>
+<p>缓存提升决策：
+$$\text{promote}(i) = \frac{\text{access_rate}(i) \times \text{value}(i)}{\text{size}(i)} &gt; \tau_{\text{level}}$$
+<strong>研究线索</strong>：</p>
+<ul>
+<li>缓存命中率与推荐质量的权衡</li>
+<li>分布式环境下的缓存一致性（使用Raft或Paxos）</li>
+<li>近似更新的误差界：$|\mathbf{u}_{\text{approx}} - \mathbf{u}_{\text{exact}}| \leq \epsilon$</li>
+<li>自适应缓存大小：基于内存压力和访问模式</li>
+<li>机器学习预测的缓存预取</li>
+</ul>
+<h3 id="1524">15.2.4 增量矩阵分解的并行算法</h3>
+<p><strong>Lock-Free更新算法</strong></p>
+<p>避免锁竞争的无锁更新：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">AtomicUpdate</span><span class="p">(</span><span class="nf">user_id</span><span class="p">,</span><span class="w"> </span><span class="n">item_id</span><span class="p">,</span><span class="w"> </span><span class="n">rating</span><span class="p">)</span><span class="err">:</span>
+<span class="w">    </span><span class="nl">loop</span><span class="p">:</span>
+<span class="w">        </span><span class="n">old_A</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">load</span><span class="p">(</span><span class="n">A</span><span class="o">[</span><span class="n">user_id</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">new_A</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">old_A</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">v</span><span class="o">[</span><span class="n">item_id</span><span class="o">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">v</span><span class="o">[</span><span class="n">item_id</span><span class="o">]</span><span class="err">&#39;</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">CAS</span><span class="p">(</span><span class="n">A</span><span class="o">[</span><span class="n">user_id</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">old_A</span><span class="p">,</span><span class="w"> </span><span class="n">new_A</span><span class="p">)</span><span class="err">:</span>
+<span class="w">            </span><span class="k">break</span>
+</code></pre></div>
+
+<p><strong>Compare-And-Swap优化</strong></p>
+<p>使用双重检查减少CAS失败：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">FastUpdate</span><span class="p">(</span><span class="nf">user_id</span><span class="p">,</span><span class="w"> </span><span class="n">item_id</span><span class="p">,</span><span class="w"> </span><span class="n">rating</span><span class="p">)</span><span class="err">:</span>
+<span class="w">    </span><span class="n">expected</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">load</span><span class="p">(</span><span class="n">version</span><span class="o">[</span><span class="n">user_id</span><span class="o">]</span><span class="p">)</span>
+<span class="w">    </span><span class="n">new_A</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">compute_update</span><span class="p">(...)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="k">load</span><span class="p">(</span><span class="n">version</span><span class="o">[</span><span class="n">user_id</span><span class="o">]</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nl">expected</span><span class="p">:</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">CAS</span><span class="p">(</span><span class="n">A</span><span class="o">[</span><span class="n">user_id</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">old_A</span><span class="p">,</span><span class="w"> </span><span class="n">new_A</span><span class="p">)</span><span class="err">:</span>
+<span class="w">            </span><span class="n">increment</span><span class="p">(</span><span class="n">version</span><span class="o">[</span><span class="n">user_id</span><span class="o">]</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>异步SGD的理论保证</strong></p>
+<p>在延迟 $\tau$ 有界的情况下：
+$$\mathbb{E}[|\mathbf{u}_T - \mathbf{u}^*|^2] \leq O\left(\frac{1}{\sqrt{T}} + \frac{\tau}{T}\right)$$
+这表明适度的异步不会显著影响收敛性。</p>
+<p><strong>Hogwild!算法分析</strong></p>
+<p>对于稀疏数据，无锁并行SGD的收敛速率：
+$$\mathbb{E}[\mathcal{L}_T] - \mathcal{L}^* \leq O\left(\frac{L\sigma^2}{T} + \frac{L^2\tau^2\sigma^2}{T^2}\right)$$
+其中 $L$ 是Lipschitz常数，$\sigma^2$ 是梯度方差。</p>
+<p><strong>延迟补偿机制</strong></p>
+<p>考虑梯度延迟的影响：
+$$\mathbf{g}_{\text{comp}} = \mathbf{g}_t + \sum_{s=t-\tau}^{t-1} \mathbf{H}_s (\mathbf{w}_s - \mathbf{w}_{t-\tau-1})$$
+其中 $\mathbf{H}_s$ 是Hessian近似。</p>
+<p><strong>分布式快照</strong></p>
+<p>使用Chandy-Lamport算法实现一致性快照：</p>
+<ol>
+<li>主节点发起快照</li>
+<li>各节点记录本地状态</li>
+<li>记录传输中的消息</li>
+<li>组合形成全局一致状态</li>
+</ol>
+<p>这允许在不停止系统的情况下进行checkpoint和恢复。</p>
+<p><strong>向量时钟同步</strong></p>
+<p>维护因果一致性：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">VectorClock</span><span class="w"> </span><span class="err">{</span>
+<span class="w">    </span><span class="nl">clocks</span><span class="p">:</span><span class="w"> </span><span class="k">Map</span><span class="o">&lt;</span><span class="n">NodeId</span><span class="p">,</span><span class="w"> </span><span class="n">LogicalTime</span><span class="o">&gt;</span>
+
+<span class="w">    </span><span class="k">update</span><span class="p">(</span><span class="n">node_id</span><span class="p">)</span><span class="err">:</span>
+<span class="w">        </span><span class="n">clocks</span><span class="o">[</span><span class="n">node_id</span><span class="o">]</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">1</span>
+
+<span class="w">    </span><span class="k">merge</span><span class="p">(</span><span class="nl">other</span><span class="p">:</span><span class="w"> </span><span class="n">VectorClock</span><span class="p">)</span><span class="err">:</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="nc">time</span><span class="p">)</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">other</span><span class="p">.</span><span class="nl">clocks</span><span class="p">:</span>
+<span class="w">            </span><span class="n">clocks</span><span class="o">[</span><span class="n">id</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nf">max</span><span class="p">(</span><span class="n">clocks</span><span class="o">[</span><span class="n">id</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="nc">time</span><span class="p">)</span>
+<span class="err">}</span>
+</code></pre></div>
+
+<h3 id="1525">15.2.5 分布式环境下的一致性保证</h3>
+<p><strong>最终一致性模型</strong></p>
+<p>定义收敛条件：
+$$\lim_{t \to \infty} \mathbb{E}[|\mathbf{U}_i^{(t)} - \mathbf{U}_j^{(t)}|_F] = 0$$
+对所有节点 $i, j$。</p>
+<p><strong>参数服务器架构</strong></p>
+<ol>
+<li>
+<p><strong>同步协议</strong>：
+   - Pull: $\mathbf{u}_i^{\text{local}} \leftarrow \text{PS}.\text{get}(i)$
+   - Compute: $\Delta \mathbf{u}_i = -\eta \nabla \ell(\mathbf{u}_i^{\text{local}})$
+   - Push: $\text{PS}.\text{update}(i, \Delta \mathbf{u}_i)$</p>
+</li>
+<li>
+<p><strong>一致性级别</strong>：
+   - 强一致性：所有更新序列化
+   - 有界陈旧性：$|\text{version}_i - \text{version}_j| \leq B$
+   - 最终一致性：无同步保证</p>
+</li>
+</ol>
+<p><strong>冲突解决策略</strong></p>
+<p>当多个节点同时更新同一嵌入：</p>
+<ol>
+<li><strong>Last-Writer-Wins</strong>：基于时间戳</li>
+<li>
+<p><strong>CRDT</strong>（无冲突复制数据类型）：
+$$\mathbf{u}_{\text{merged}} = \frac{1}{|\mathcal{N}|} \sum_{n \in \mathcal{N}} \mathbf{u}_n$$</p>
+</li>
+<li>
+<p><strong>加权平均</strong>：基于更新质量
+$$\mathbf{u}_{\text{merged}} = \frac{\sum_n w_n \mathbf{u}_n}{\sum_n w_n}$$
+<strong>通信优化</strong></p>
+</li>
+<li>
+<p><strong>梯度压缩</strong>：
+   - Top-k稀疏化：只传输最大的 $k$ 个梯度分量
+   - 量化：使用低精度表示
+   - 误差反馈：累积压缩误差</p>
+</li>
+<li>
+<p><strong>异步通信</strong>：
+   <code>async_push(gradient):
+       compressed = compress(gradient)
+       future = send_async(compressed)
+       error_buffer += gradient - decompress(compressed)</code></p>
+</li>
+</ol>
+<p><strong>理论保证</strong></p>
+<p>分布式SGD的收敛速率：
+$$\mathbb{E}[|\nabla \mathcal{L}_T|^2] \leq O\left(\frac{1}{\sqrt{nT}} + \frac{\sigma^2}{nT} + \frac{G^2\tau^2}{T^2}\right)$$
+其中 $n$ 是节点数，展示了线性加速直到通信瓶颈。</p>
+<h2 id="153">15.3 冷启动问题的矩阵补全视角</h2>
+<h3 id="1531">15.3.1 迁移学习框架</h3>
+<p>将冷启动视为少样本矩阵补全问题，利用已有用户/物品的知识构建有效的先验。这种方法将冷启动从"无中生有"转变为"知识迁移"。</p>
+<p><strong>共享隐空间模型</strong></p>
+<p>基本假设：新用户的隐向量可以从其特征预测：
+$$\mathbf{u}_{\text{new}} = \mathbf{W}_u \mathbf{f}_u + \boldsymbol{\epsilon}_u$$
+其中：</p>
+<ul>
+<li>$\mathbf{f}_u \in \mathbb{R}^d$ 是用户特征（人口统计学、注册信息等）</li>
+<li>$\mathbf{W}_u \in \mathbb{R}^{r \times d}$ 是学习的映射矩阵</li>
+<li>$\boldsymbol{\epsilon}_u$ 是个性化偏差</li>
+</ul>
+<p><strong>分层贝叶斯模型</strong></p>
+<p>更精细的建模考虑不确定性：
+$$\begin{aligned}
+\mathbf{u}_i &amp;\sim \mathcal{N}(\mathbf{W}_u \mathbf{f}_i, \boldsymbol{\Sigma}_u) \
+\mathbf{W}_u &amp;\sim \mathcal{MN}(\mathbf{M}_0, \boldsymbol{\Sigma}_u, \boldsymbol{\Omega}) \
+r_{ij} &amp;\sim \mathcal{N}(\mathbf{u}_i^T \mathbf{v}_j, \sigma^2)
+\end{aligned}$$
+这提供了预测的不确定性估计，对主动学习至关重要。</p>
+<p><strong>元学习视角</strong></p>
+<p>将冷启动视为few-shot learning问题：</p>
+<ol>
+<li><strong>元训练</strong>：在历史用户上学习"如何快速学习"</li>
+<li><strong>元测试</strong>：对新用户快速适应</li>
+</ol>
+<p>使用MAML（Model-Agnostic Meta-Learning）框架：
+$$\mathbf{W}^* = \arg\min_{\mathbf{W}} \sum_{i \in \mathcal{T}_{\text{train}}} \mathcal{L}(\mathbf{W} - \alpha\nabla_{\mathbf{W}}\mathcal{L}_i(\mathbf{W}))$$
+<strong>多任务学习</strong></p>
+<p>不同用户群体共享部分结构：
+$$\mathbf{U} = \mathbf{U}_{\text{shared}} + \sum_{k=1}^K \mathbf{U}_k \odot \mathbf{Z}_k$$
+其中 $\mathbf{Z}_k$ 是群体指示矩阵。</p>
+<h3 id="1532">15.3.2 主动学习策略</h3>
+<p>选择最优的初始交互来快速学习新用户偏好。关键是平衡探索（减少不确定性）与利用（提供好的推荐）。</p>
+<p><strong>不确定性采样</strong></p>
+<p>基于后验方差选择物品：
+$$j^* = \arg\max_j \text{Var}[\hat{r}_{ij} | \mathcal{D}]$$
+对于线性模型，方差可解析计算：
+$$\text{Var}[\hat{r}_{ij}] = \mathbf{v}_j^T (\mathbf{V}_{\mathcal{D}}^T\mathbf{V}_{\mathcal{D}} + \lambda\mathbf{I})^{-1} \mathbf{v}_j$$
+<strong>信息增益最大化</strong></p>
+<p>选择最大化互信息的物品：
+$$j^* = \arg\max_j I(\mathbf{u}_i; r_{ij} | \mathcal{D})$$
+对于高斯分布：
+$$I(\mathbf{u}_i; r_{ij}) = \frac{1}{2}\log\left(1 + \frac{\mathbf{v}_j^T\boldsymbol{\Sigma}_{\mathbf{u}|i}\mathbf{v}_j}{\sigma^2}\right)$$
+<strong>Thompson采样</strong></p>
+<p>平衡探索与利用的贝叶斯方法：</p>
+<ol>
+<li>从后验采样：$\tilde{\mathbf{u}}_i \sim p(\mathbf{u}_i | \mathcal{D})$</li>
+<li>选择期望回报最高的物品：$j^* = \arg\max_j \tilde{\mathbf{u}}_i^T \mathbf{v}_j$</li>
+</ol>
+<p><strong>批量主动学习</strong></p>
+<p>同时选择 $k$ 个物品的次模优化问题：
+$$\mathcal{S}^* = \arg\max_{|\mathcal{S}|=k} f(\mathcal{S})$$
+其中 $f(\mathcal{S})$ 是次模函数（如信息增益）。贪心算法提供 $(1-1/e)$ 近似保证。</p>
+<p><strong>上下文相关的主动学习</strong></p>
+<p>考虑时间、位置等上下文：
+$$j^* = \arg\max_j g(\text{uncertainty}_j, \text{context}_t, \text{diversity}(\mathcal{S} \cup {j}))$$</p>
+<h3 id="1533">15.3.3 理论保证</h3>
+<p><strong>样本复杂度界</strong></p>
+<p>给定秩-$r$ 矩阵，达到 $\epsilon$-精度需要的样本数：</p>
+<p><strong>均匀采样情况</strong>：
+$$m = O(r(n_1 + n_2)\log(1/\epsilon))$$
+<strong>非均匀采样的改进界</strong>：
+$$m = O(\mu r \log(n_1 + n_2) \log(1/\epsilon))$$
+其中 $\mu$ 是相干性参数。</p>
+<p><strong>在线学习的regret界</strong></p>
+<p>对于冷启动用户的累积regret：
+$$R_T = \sum_{t=1}^T (r^* - r_t) = O(\sqrt{rT\log T})$$
+其中 $r^*$ 是最优推荐的回报。</p>
+<p><strong>主动学习的加速</strong></p>
+<p>相比随机选择，主动学习可以指数级减少样本需求：</p>
+<ul>
+<li>随机：$m_{\text{random}} = O(r^2/\epsilon^2)$</li>
+<li>主动：$m_{\text{active}} = O(r\log(1/\epsilon))$</li>
+</ul>
+<p><strong>矩阵补全的信息论下界</strong></p>
+<p>任何算法至少需要：
+$$m \geq c \cdot r(n_1 + n_2 - r)$$
+个观测才能精确恢复秩-$r$ 矩阵。</p>
+<p><strong>关键挑战</strong>：</p>
+<ul>
+<li>非均匀缺失模式下的理论分析</li>
+<li>在线设置下的自适应采样</li>
+<li>隐私保护约束下的冷启动（差分隐私）</li>
+<li>对抗性环境下的鲁棒性保证</li>
+</ul>
+<h3 id="1534">15.3.4 实用技术与优化</h3>
+<p><strong>混合方法</strong></p>
+<p>结合多种信息源：</p>
+<ol>
+<li><strong>内容特征</strong>：使用深度学习提取</li>
+<li><strong>社交信号</strong>：利用用户关系网络</li>
+<li><strong>隐式反馈</strong>：浏览、搜索等弱信号</li>
+<li><strong>跨域信息</strong>：从其他产品迁移知识</li>
+</ol>
+<p><strong>渐进式个性化</strong></p>
+<p>随着数据积累逐步过渡：
+$$\mathbf{u}_i(t) = \alpha(t) \cdot \mathbf{u}_{\text{prior}} + (1-\alpha(t)) \cdot \mathbf{u}_{\text{learned}}$$
+其中 $\alpha(t) = \exp(-\gamma \cdot n_i(t))$。</p>
+<p><strong>群体先验</strong></p>
+<p>利用相似用户群体：
+$$\mathbf{u}_{\text{prior}} = \frac{1}{|\mathcal{N}_i|}\sum_{k \in \mathcal{N}_i} \mathbf{u}_k$$
+其中 $\mathcal{N}_i$ 是基于特征的最近邻。</p>
+<p><strong>在线更新的数值技巧</strong></p>
+<ol>
+<li><strong>增量SVD</strong>：避免重新分解</li>
+<li><strong>稀疏更新</strong>：只更新相关维度</li>
+<li><strong>量化嵌入</strong>：减少存储和计算</li>
+<li><strong>分级精度</strong>：新用户用低精度，逐步提升</li>
+</ol>
+<h2 id="154">15.4 时序动态的矩阵建模</h2>
+<h3 id="1541">15.4.1 时变隐因子模型</h3>
+<p>用户和物品的隐因子随时间演化：
+$$\mathbf{u}_i(t) = \mathbf{u}_i(t-1) + \mathbf{w}_i(t)$$
+$$\mathbf{v}_j(t) = \mathbf{v}_j(t-1) + \mathbf{z}_j(t)$$
+其中 $\mathbf{w}_i(t), \mathbf{z}_j(t)$ 是演化噪声。</p>
+<h3 id="1542-kalman">15.4.2 Kalman滤波的应用</h3>
+<p>将隐因子演化建模为状态空间模型：</p>
+<p><strong>状态方程</strong>：
+$$\mathbf{x}_t = \mathbf{F}\mathbf{x}_t + \mathbf{w}_t$$
+<strong>观测方程</strong>：
+$$r_t = \mathbf{h}_t^T \mathbf{x}_t + v_t$$
+Kalman滤波提供了最优的在线估计。</p>
+<h3 id="1543">15.4.3 周期性模式捕获</h3>
+<p>许多推荐场景存在周期性（日、周、季节）：</p>
+<p><strong>傅里叶基展开</strong>：
+$$\mathbf{u}_i(t) = \mathbf{u}_i^{(0)} + \sum_{k=1}^K (\mathbf{a}_{ik} \cos(\omega_k t) + \mathbf{b}_{ik} \sin(\omega_k t))$$
+<strong>研究方向</strong>：</p>
+<ul>
+<li>自适应频率检测</li>
+<li>非平稳周期性建模</li>
+<li>多尺度时间动态的联合建模</li>
+</ul>
+<h3 id="1544">15.4.4 变点检测</h3>
+<p>用户兴趣的突变需要及时检测：</p>
+<p><strong>CUSUM算法</strong>的矩阵版本：
+$$S_t = \max(0, S_{t-1} + |\mathbf{r}_t - \mathbf{U}_t\mathbf{V}_t^T|_F - \delta)$$
+当 $S_t &gt; h$ 时触发变点警报。</p>
+<p><strong>高级主题</strong>：</p>
+<ul>
+<li>在线贝叶斯变点检测</li>
+<li>多用户协同变点检测</li>
+<li>假阳性率与检测延迟的权衡</li>
+</ul>
+<h2 id="155-gotchas">15.5 常见陷阱与错误（Gotchas）</h2>
+<h3 id="1551">15.5.1 数值稳定性陷阱</h3>
+<ol>
+<li>
+<p><strong>梯度爆炸/消失</strong>
+   - 错误：直接使用固定学习率
+   - 正确：自适应学习率 + 梯度裁剪
+   - 诊断：监控梯度范数 $|\nabla\mathcal{L}|$</p>
+</li>
+<li>
+<p><strong>矩阵奇异性</strong>
+   - 错误：直接求逆 $(\mathbf{X}^T\mathbf{X})^{-1}$
+   - 正确：添加正则化 $(\mathbf{X}^T\mathbf{X} + \lambda\mathbf{I})^{-1}$
+   - 诊断：检查条件数 $\kappa(\mathbf{A})$</p>
+</li>
+<li>
+<p><strong>浮点误差累积</strong>
+   - 错误：无限累积增量更新
+   - 正确：定期重新计算基准值
+   - 诊断：比较增量结果与批处理结果</p>
+</li>
+</ol>
+<h3 id="1552">15.5.2 算法设计陷阱</h3>
+<ol>
+<li>
+<p><strong>过度遗忘</strong>
+   - 症状：模型性能剧烈波动
+   - 原因：遗忘率 $\beta$ 设置过大
+   - 解决：自适应遗忘率，考虑数据稀疏性</p>
+</li>
+<li>
+<p><strong>冷启动过拟合</strong>
+   - 症状：新用户推荐极端化
+   - 原因：样本过少时过度更新
+   - 解决：设置最小样本阈值，使用先验</p>
+</li>
+<li>
+<p><strong>并发更新冲突</strong>
+   - 症状：结果不确定性
+   - 原因：多线程同时更新同一嵌入
+   - 解决：细粒度锁或无锁算法</p>
+</li>
+</ol>
+<h3 id="1553">15.5.3 系统实现陷阱</h3>
+<ol>
+<li>
+<p><strong>内存泄漏</strong>
+   - 原因：历史数据无限增长
+   - 解决：实现严格的生命周期管理
+   - 工具：内存profiler定期检查</p>
+</li>
+<li>
+<p><strong>缓存失效风暴</strong>
+   - 原因：大规模更新触发全局失效
+   - 解决：渐进式失效策略
+   - 监控：缓存命中率实时监控</p>
+</li>
+</ol>
+<h2 id="156">15.6 最佳实践检查清单</h2>
+<h3 id="1561">15.6.1 算法设计审查</h3>
+<ul>
+<li>[ ] <strong>遗忘机制设计</strong></li>
+<li>是否考虑了数据分布的非平稳性？</li>
+<li>遗忘率是否自适应调整？</li>
+<li>
+<p>是否保留了关键历史信息？</p>
+</li>
+<li>
+<p>[ ] <strong>更新策略优化</strong></p>
+</li>
+<li>是否利用了矩阵结构（低秩、稀疏）？</li>
+<li>增量更新的计算复杂度是否优于重新训练？</li>
+<li>
+<p>是否实现了懒惰求值？</p>
+</li>
+<li>
+<p>[ ] <strong>数值稳定性保证</strong></p>
+</li>
+<li>是否添加了适当的正则化？</li>
+<li>是否实现了梯度裁剪？</li>
+<li>是否定期检查数值健康度？</li>
+</ul>
+<h3 id="1562">15.6.2 系统实现审查</h3>
+<ul>
+<li>[ ] <strong>并发控制</strong></li>
+<li>是否正确处理了并发更新？</li>
+<li>锁粒度是否合理？</li>
+<li>
+<p>是否考虑了无锁算法？</p>
+</li>
+<li>
+<p>[ ] <strong>资源管理</strong></p>
+</li>
+<li>内存使用是否有上界？</li>
+<li>是否实现了优雅降级？</li>
+<li>
+<p>是否有资源泄漏检测？</p>
+</li>
+<li>
+<p>[ ] <strong>监控与调试</strong></p>
+</li>
+<li>是否记录了关键性能指标？</li>
+<li>是否可以回放历史更新？</li>
+<li>是否有异常检测机制？</li>
+</ul>
+<h3 id="1563">15.6.3 性能优化审查</h3>
+<ul>
+<li>[ ] <strong>计算优化</strong></li>
+<li>是否使用了SIMD指令？</li>
+<li>矩阵运算是否cache-friendly？</li>
+<li>
+<p>是否考虑了GPU加速？</p>
+</li>
+<li>
+<p>[ ] <strong>存储优化</strong></p>
+</li>
+<li>是否使用了紧凑的数据结构？</li>
+<li>热数据是否在内存中？</li>
+<li>是否实现了分层存储？</li>
+</ul>
+<h2 id="157">15.7 本章小结</h2>
+<p>本章深入探讨了实时推荐系统中的增量矩阵方法，主要贡献包括：</p>
+<ol>
+<li>
+<p><strong>理论框架</strong>：建立了在线矩阵分解的统一分析框架，包括遗忘机制、收敛性保证和regret界。</p>
+</li>
+<li>
+<p><strong>算法创新</strong>：
+   - 自适应遗忘率的在线SGD
+   - 基于Sherman-Morrison的快速嵌入更新
+   - 矩阵补全视角的冷启动解决方案
+   - Kalman滤波的时序建模</p>
+</li>
+<li>
+<p><strong>实践指导</strong>：总结了常见陷阱、最佳实践和性能优化技巧。</p>
+</li>
+</ol>
+<p><strong>关键公式汇总</strong>：</p>
+<ul>
+<li>指数遗忘权重：$w_{ij}^{(t)} = \exp(-\beta(t - t_{ij}))$</li>
+<li>Sherman-Morrison更新：$(\mathbf{A} + \mathbf{x}\mathbf{x}^T)^{-1} = \mathbf{A}^{-1} - \frac{\mathbf{A}^{-1}\mathbf{x}\mathbf{x}^T\mathbf{A}^{-1}}{1 + \mathbf{x}^T\mathbf{A}^{-1}\mathbf{x}}$</li>
+<li>动态正则化：$\lambda_i^{(t)} = \lambda_0 / \sqrt{n_i^{(t)} + 1}$</li>
+<li>时变隐因子：$\mathbf{u}_i(t) = \mathbf{u}_i(t-1) + \mathbf{w}_i(t)$</li>
+</ul>
+<p><strong>未来研究方向</strong>：</p>
+<ul>
+<li>深度学习与增量矩阵方法的结合</li>
+<li>联邦学习场景下的分布式增量更新</li>
+<li>因果推断在动态推荐中的应用</li>
+<li>量子算法加速矩阵更新</li>
+</ul>
+<h2 id="158">15.8 练习题</h2>
+<h3 id="_1">基础题</h3>
+<p><strong>练习15.1</strong> 证明指数遗忘权重下的SGD更新等价于求解一个加权最小二乘问题。</p>
+<p><em>提示</em>：考虑累积损失函数 $\sum_{s=1}^t \beta^{t-s} \ell_s$。</p>
+<details>
+<summary>答案</summary>
+<p>定义累积损失：
+$$\mathcal{L}_t = \sum_{s=1}^t \beta^{t-s} (r_s - \mathbf{u}_{i_s}^T \mathbf{v}_{j_s})^2$$
+对 $\mathbf{u}_i$ 求导：
+$$\nabla_{\mathbf{u}_i} \mathcal{L}_t = -2 \sum_{s: i_s=i} \beta^{t-s} (r_s - \mathbf{u}_i^T \mathbf{v}_{j_s}) \mathbf{v}_{j_s}$$
+这正是加权最小二乘的梯度，权重为 $w_s = \beta^{t-s}$。</p>
+</details>
+<p><strong>练习15.2</strong> 给定秩为 $r$ 的 $m \times n$ 矩阵，使用Sherman-Morrison公式计算添加一个新行后的SVD更新复杂度。</p>
+<p><em>提示</em>：考虑增量SVD的计算步骤。</p>
+<details>
+<summary>答案</summary>
+<p>原始SVD：$\mathbf{M} = \mathbf{U}\boldsymbol{\Sigma}\mathbf{V}^T$</p>
+<p>添加新行 $\mathbf{a}^T$ 后：
+$$\mathbf{M}' = \begin{bmatrix} \mathbf{M} \ \mathbf{a}^T \end{bmatrix}$$
+计算步骤：</p>
+<ol>
+<li>投影：$\mathbf{p} = \mathbf{V}^T\mathbf{a}$，复杂度 $O(nr)$</li>
+<li>正交分量：$\mathbf{q} = \mathbf{a} - \mathbf{V}\mathbf{p}$，复杂度 $O(nr)$</li>
+<li>更新小矩阵SVD：$O(r^2)$</li>
+</ol>
+<p>总复杂度：$O(nr + r^2)$，远小于重新计算 $O(mn\min(m,n))$。</p>
+</details>
+<p><strong>练习15.3</strong> 设计一个自适应遗忘率算法，使得稀疏用户的数据保留更久。</p>
+<p><em>提示</em>：遗忘率应该与用户活跃度成反比。</p>
+<details>
+<summary>答案</summary>
+<p>自适应遗忘率：
+$$\beta_i(t) = \beta_0 \cdot \frac{\bar{n}}{n_i(t) + \epsilon}$$
+其中：</p>
+<ul>
+<li>$n_i(t)$ 是用户 $i$ 在时间窗口内的交互次数</li>
+<li>$\bar{n}$ 是所有用户的平均交互次数</li>
+<li>$\epsilon$ 防止除零</li>
+</ul>
+<p>这样稀疏用户（$n_i(t)$ 小）的 $\beta_i(t)$ 更小，数据保留更久。</p>
+</details>
+<h3 id="_2">挑战题</h3>
+<p><strong>练习15.4</strong> 推导在线矩阵分解的regret界，考虑数据流是对抗性选择的情况。</p>
+<p><em>提示</em>：使用在线凸优化的分析框架，注意矩阵分解的非凸性。</p>
+<details>
+<summary>答案</summary>
+<p>定义regret：
+$$R_T = \sum_{t=1}^T \ell_t(\mathbf{U}_t, \mathbf{V}_t) - \min_{\mathbf{U},\mathbf{V}} \sum_{t=1}^T \ell_t(\mathbf{U}, \mathbf{V})$$
+关键步骤：</p>
+<ol>
+<li>限制在有界集合：$|\mathbf{U}|_F \leq B_U$，$|\mathbf{V}|_F \leq B_V$</li>
+<li>使用Online Gradient Descent的regret界</li>
+<li>处理非凸性：考虑局部线性化</li>
+</ol>
+<p>在适当条件下，可得：
+$$R_T = O(\sqrt{T}(B_U + B_V))$$
+注意：这是局部regret，全局最优需要额外假设。</p>
+</details>
+<p><strong>练习15.5</strong> 设计一个分布式增量矩阵分解算法，支持异步更新且保证最终一致性。</p>
+<p><em>提示</em>：考虑参数服务器架构和延迟补偿。</p>
+<details>
+<summary>答案</summary>
+<p>算法框架：</p>
+<ol>
+<li><strong>参数服务器</strong>存储全局嵌入 $\mathbf{U}, \mathbf{V}$</li>
+<li><strong>工作节点</strong>处理本地数据流</li>
+</ol>
+<p>异步更新协议：</p>
+<div class="codehilite"><pre><span></span><code>Worker k:
+1. Pull: 获取相关嵌入 u_i, v_j
+2. Compute: 计算梯度 g_u, g_v
+3. Push: 发送带时间戳的更新 (g_u, g_v, τ)
+
+Server:
+1. 接收更新 (g, τ)
+2. 延迟补偿：g&#39; = g <span class="gs">* decay(t - τ)</span>
+<span class="gs">3. 应用更新：param += -η *</span> g&#39;
+</code></pre></div>
+
+<p>一致性保证：</p>
+<ul>
+<li>有界延迟：$t - τ \leq \Delta$</li>
+<li>衰减函数：$\text{decay}(\delta) = \exp(-\alpha\delta)$</li>
+<li>收敛条件：$\eta &lt; \frac{1}{L(1 + \alpha\Delta)}$</li>
+</ul>
+</details>
+<p><strong>练习15.6</strong> 分析Kalman滤波在隐因子演化中的计算瓶颈，提出一个近似算法将复杂度从 $O(r^3)$ 降到 $O(r)$。</p>
+<p><em>提示</em>：利用协方差矩阵的特殊结构。</p>
+<details>
+<summary>答案</summary>
+<p>标准Kalman更新的瓶颈在协方差更新：
+$$\mathbf{P}_t = \mathbf{P}_{t|t-1} - \mathbf{K}_t\mathbf{H}_t\mathbf{P}_{t|t-1}$$
+近似方案：</p>
+<ol>
+<li><strong>对角近似</strong>：假设 $\mathbf{P}_t \approx \text{diag}(p_1, ..., p_r)$</li>
+<li>
+<p><strong>更新公式</strong>：
+$$p_i^{(t)} = \frac{p_i^{(t-1)} + q}{1 + h_i^2(p_i^{(t-1)} + q)/r}$$</p>
+</li>
+<li>
+<p><strong>误差补偿</strong>：定期（每 $k$ 步）运行完整更新</p>
+</li>
+</ol>
+<p>复杂度分析：</p>
+<ul>
+<li>对角更新：$O(r)$ per step</li>
+<li>完整更新：$O(r^3)$ every $k$ steps</li>
+<li>均摊复杂度：$O(r + r^3/k)$</li>
+</ul>
+</details>
+<p><strong>练习15.7</strong> 推导多任务学习框架下的增量矩阵分解，其中不同任务共享部分隐空间。</p>
+<p><em>提示</em>：使用分块矩阵表示共享和特定结构。</p>
+<details>
+<summary>答案</summary>
+<p>多任务隐因子分解：
+$$\mathbf{U}_i^{(k)} = [\mathbf{U}_i^{(\text{shared})}, \mathbf{U}_i^{(k,\text{specific})}]$$
+目标函数：
+$$\mathcal{L} = \sum_{k=1}^K \sum_{(i,j) \in \Omega_k} (r_{ij}^{(k)} - (\mathbf{U}_i^{(k)})^T \mathbf{V}_j^{(k)})^2 + \lambda |\mathbf{U}^{(\text{shared})}|_F^2$$
+增量更新策略：</p>
+<ol>
+<li>
+<p>共享部分：聚合所有任务的梯度
+$$\mathbf{u}_i^{(\text{shared})} \leftarrow \mathbf{u}_i^{(\text{shared})} - \eta \sum_k \alpha_k \nabla_{\text{shared}} \ell^{(k)}$$</p>
+</li>
+<li>
+<p>特定部分：独立更新
+$$\mathbf{u}_i^{(k,\text{specific})} \leftarrow \mathbf{u}_i^{(k,\text{specific})} - \eta \nabla_{\text{specific}} \ell^{(k)}$$
+关键挑战：</p>
+</li>
+</ol>
+<ul>
+<li>平衡共享与特定的贡献</li>
+<li>任务权重 $\alpha_k$ 的自适应调整</li>
+<li>异构数据流的处理</li>
+</ul>
+</details>
+<p><strong>练习15.8</strong> 设计一个在线算法同时处理显式评分和隐式反馈，考虑两种数据的不同噪声特性和到达频率。</p>
+<p><em>提示</em>：使用多目标优化框架。</p>
+<details>
+<summary>答案</summary>
+<p>统一建模框架：
+$$\mathcal{L} = \underbrace{\sum_{(i,j) \in \Omega_e} (r_{ij} - \mathbf{u}_i^T\mathbf{v}_j)^2}_{\text{显式评分}} + \underbrace{\sum_{(i,j) \in \Omega_i} c_{ij}(p_{ij} - \mathbf{u}_i^T\mathbf{v}_j)^2}_{\text{隐式反馈}}$$
+其中：</p>
+<ul>
+<li>$c_{ij} = 1 + \alpha \log(1 + \text{count}_{ij})$ 是置信度权重</li>
+<li>$p_{ij} = 1$ 表示有交互，$p_{ij} = 0$ 表示采样的负例</li>
+</ul>
+<p>自适应更新策略：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">if</span><span class="w"> </span><span class="nx">explicit_rating</span><span class="w"> </span><span class="nx">arrives</span><span class="p">:</span>
+<span class="w">    </span><span class="nx">η_e</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">η_0</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nx">sqrt</span><span class="p">(</span><span class="nx">n_explicit</span><span class="p">)</span>
+<span class="w">    </span><span class="nx">update</span><span class="w"> </span><span class="nx">with</span><span class="w"> </span><span class="nx">weight</span><span class="w"> </span><span class="nx">w_e</span>
+
+<span class="k">if</span><span class="w"> </span><span class="nx">implicit_feedback</span><span class="w"> </span><span class="nx">arrives</span><span class="p">:</span>
+<span class="w">    </span><span class="nx">η_i</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">η_0</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nx">sqrt</span><span class="p">(</span><span class="nx">n_implicit</span><span class="p">)</span>
+<span class="w">    </span><span class="nx">update</span><span class="w"> </span><span class="nx">with</span><span class="w"> </span><span class="nx">weight</span><span class="w"> </span><span class="nx">w_i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nx">c_ij</span>
+</code></pre></div>
+
+<p>动态权重调整：
+$$w_e : w_i = \frac{\text{var}[\text{implicit}]}{\text{var}[\text{explicit}]} \cdot \frac{|\Omega_i|}{|\Omega_e|}$$</p>
+<p>这平衡了两种数据源的贡献，考虑了噪声水平和数据量。</p>
+</details>
+            </article>
+            
+            <nav class="page-nav"><a href="./chapter14.html" class="nav-link prev">← 第14章：大规模协同过滤的矩阵技术</a><a href="./chapter16.html" class="nav-link next">第16章：多模态推荐的张量分解 →</a></nav>
+        </main>
+    </div>
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高级大规模矩阵计算教程</title>
+    <link rel="stylesheet" href="./assets/style.css">
+    <link rel="stylesheet" href="./assets/highlight.css">
+    <script src="./assets/script.js" defer></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$']],
+                displayMath: [['$$', '$$']],
+                processEscapes: false,
+                packages: {'[+]': ['noerrors']}
+            },
+            options: {
+                ignoreHtmlClass: 'tex2jax_ignore',
+                processHtmlClass: 'tex2jax_process'
+            },
+            loader: {
+                load: ['[tex]/noerrors']
+            }
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <nav id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <h3>目录</h3>
+                <button id="sidebar-toggle" class="sidebar-toggle">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+            <ul class="nav-list"><li class="active"><a href="./index.html">高级大规模矩阵计算教程</a></li><li class=""><a href="./chapter1.html">第1章：二阶优化的统一框架</a></li><li class=""><a href="./chapter2.html">第2章：Hessian近似的艺术</a></li><li class=""><a href="./chapter3.html">第3章：结构化二阶方法</a></li><li class=""><a href="./chapter4.html">第4章：增量Hessian计算</a></li><li class=""><a href="./chapter5.html">第5章：Schur补的妙用</a></li><li class=""><a href="./chapter6.html">第6章：矩阵Sketching技术</a></li><li class=""><a href="./chapter7.html">第7章：随机化数值线性代数</a></li><li class=""><a href="./chapter8.html">第8章：分布式矩阵运算</a></li><li class=""><a href="./chapter9.html">第9章：异步优化的数学基础</a></li><li class=""><a href="./chapter10.html">第10章：Riemannian优化基础</a></li><li class=""><a href="./chapter11.html">第11章：流形预条件技术</a></li><li class=""><a href="./chapter12.html">第12章：结构化矩阵的快速算法</a></li><li class=""><a href="./chapter13.html">第13章：动态低秩近似</a></li><li class=""><a href="./chapter14.html">第14章：大规模协同过滤的矩阵技术</a></li><li class=""><a href="./chapter15.html">第15章：实时推荐的增量矩阵方法</a></li><li class=""><a href="./chapter16.html">第16章：多模态推荐的张量分解</a></li><li class=""><a href="./chapter17.html">第17章：隐式微分与双层优化</a></li><li class=""><a href="./chapter18.html">第18章：量子启发的矩阵算法</a></li><li class=""><a href="./chapter19.html">附录A：数值稳定性速查表</a></li><li class=""><a href="./chapter20.html">附录B：性能调优检查清单</a></li><li class=""><a href="./chapter21.html">附录C：常用矩阵恒等式</a></li><li class=""><a href="./CLAUDE.html">高级大规模矩阵计算教程项目说明</a></li><li class=""><a href="./README.html">高级大规模矩阵计算教程</a></li></ul>
+        </nav>
+        
+        <main class="content">
+            <article>
+                <h1 id="_1">高级大规模矩阵计算教程</h1>
+<h2 id="_2">前言</h2>
+<p>本教程面向熟悉基础矩阵计算的研究者和AI科学家，深入探讨大规模矩阵计算中的高级主题。我们不仅关注经典算法，更强调在现代AI应用中尚未充分研究的数学问题。每章包含理论分析、实践技巧、常见陷阱以及大量习题。</p>
+<h2 id="_3">目录</h2>
+<h3 id="_4">第一部分：二阶优化方法基础</h3>
+<h4 id="1"><a href="chapter1.html">第1章：二阶优化的统一框架</a></h4>
+<ul>
+<li>Newton法、Gauss-Newton法与Natural Gradient的数学联系</li>
+<li>Fisher信息矩阵与Hessian的关系</li>
+<li>Trust Region方法在深度学习中的复兴</li>
+<li>鞍点逃逸的理论与实践</li>
+</ul>
+<h4 id="2hessian"><a href="chapter2.html">第2章：Hessian近似的艺术</a></h4>
+<ul>
+<li>从BFGS到L-BFGS：有限内存方法的深入剖析</li>
+<li>Hessian-vector product的高效计算</li>
+<li>负曲率方向的检测与利用</li>
+<li>数值稳定性与条件数控制</li>
+</ul>
+<h4 id="3"><a href="chapter3.html">第3章：结构化二阶方法</a></h4>
+<ul>
+<li>Kronecker因子分解：K-FAC及其变体</li>
+<li>Block对角近似：Shampoo算法解析</li>
+<li>低秩加对角结构的利用</li>
+<li>稀疏Hessian模式的自动发现</li>
+</ul>
+<h3 id="_5">第二部分：增量与在线算法</h3>
+<h4 id="4hessian"><a href="chapter4.html">第4章：增量Hessian计算</a></h4>
+<ul>
+<li>Woodbury矩阵恒等式的高级应用</li>
+<li>Block-wise更新策略</li>
+<li>Sliding window技术</li>
+<li>与在线凸优化的深度联系</li>
+</ul>
+<h4 id="5schur"><a href="chapter5.html">第5章：Schur补的妙用</a></h4>
+<ul>
+<li>分块矩阵求逆的递归策略</li>
+<li>在分布式优化中的应用</li>
+<li>条件数改善技术</li>
+<li>与域分解方法的联系</li>
+</ul>
+<h3 id="_6">第三部分：随机化方法</h3>
+<h4 id="6sketching"><a href="chapter6.html">第6章：矩阵Sketching技术</a></h4>
+<ul>
+<li>Johnson-Lindenstrauss引理的实用化</li>
+<li>CountSketch与随机投影</li>
+<li>Frequent Directions算法</li>
+<li>在神经网络压缩中的应用</li>
+</ul>
+<h4 id="7"><a href="chapter7.html">第7章：随机化数值线性代数</a></h4>
+<ul>
+<li>随机SVD的误差分析</li>
+<li>Nyström方法的现代视角</li>
+<li>随机化预条件子设计</li>
+<li>量子启发的采样策略</li>
+</ul>
+<h3 id="_7">第四部分：分布式与并行计算</h3>
+<h4 id="8"><a href="chapter8.html">第8章：分布式矩阵运算</a></h4>
+<ul>
+<li>通信高效的矩阵分解</li>
+<li>Gossip算法的收敛性分析</li>
+<li>异步更新的一致性保证</li>
+<li>拜占庭鲁棒性设计</li>
+</ul>
+<h4 id="9"><a href="chapter9.html">第9章：异步优化的数学基础</a></h4>
+<ul>
+<li>延迟梯度的误差累积分析</li>
+<li>Lock-free算法设计</li>
+<li>局部一致性与全局收敛</li>
+<li>硬件感知的算法调优</li>
+</ul>
+<h3 id="_8">第五部分：流形优化</h3>
+<h4 id="10riemannian"><a href="chapter10.html">第10章：Riemannian优化基础</a></h4>
+<ul>
+<li>矩阵流形上的几何结构</li>
+<li>Riemannian梯度与Hessian</li>
+<li>回缩与向量传输</li>
+<li>在低秩矩阵补全中的应用</li>
+</ul>
+<h4 id="11"><a href="chapter11.html">第11章：流形预条件技术</a></h4>
+<ul>
+<li>流形上的Natural Gradient</li>
+<li>Riemannian BFGS方法</li>
+<li>几何感知的Trust Region</li>
+<li>与欧氏空间方法的性能对比</li>
+</ul>
+<h3 id="_9">第六部分：特殊结构利用</h3>
+<h4 id="12"><a href="chapter12.html">第12章：结构化矩阵的快速算法</a></h4>
+<ul>
+<li>Toeplitz与循环矩阵的FFT技巧</li>
+<li>Kronecker积的高效运算</li>
+<li>分层矩阵（H-matrices）</li>
+<li>在卷积网络中的应用</li>
+</ul>
+<h4 id="13"><a href="chapter13.html">第13章：动态低秩近似</a></h4>
+<ul>
+<li>流式SVD更新</li>
+<li>自适应秩选择</li>
+<li>在线矩阵补全</li>
+<li>与神经网络剪枝的联系</li>
+</ul>
+<h3 id="_10">第七部分：推荐系统中的矩阵计算</h3>
+<h4 id="14"><a href="chapter14.html">第14章：大规模协同过滤的矩阵技术</a></h4>
+<ul>
+<li>隐式反馈矩阵分解的加权策略</li>
+<li>ALS-WR算法的并行化与数值优化</li>
+<li>负采样的数学原理与偏差校正</li>
+<li>置信度加权的理论基础</li>
+</ul>
+<h4 id="15"><a href="chapter15.html">第15章：实时推荐的增量矩阵方法</a></h4>
+<ul>
+<li>在线矩阵分解的遗忘机制</li>
+<li>用户/物品嵌入的快速更新</li>
+<li>冷启动问题的矩阵补全视角</li>
+<li>时序动态的矩阵建模</li>
+</ul>
+<h4 id="16"><a href="chapter16.html">第16章：多模态推荐的张量分解</a></h4>
+<ul>
+<li>高阶交互的张量建模</li>
+<li>CP分解与Tucker分解的可扩展实现</li>
+<li>稀疏张量的高效存储与计算</li>
+<li>跨域推荐的耦合矩阵分解</li>
+</ul>
+<h3 id="_11">第八部分：前沿主题</h3>
+<h4 id="17"><a href="chapter17.html">第17章：隐式微分与双层优化</a></h4>
+<ul>
+<li>大规模线性系统的隐式求解</li>
+<li>自动微分的高级技巧</li>
+<li>在元学习中的应用</li>
+<li>数值稳定性挑战</li>
+</ul>
+<h4 id="18"><a href="chapter18.html">第18章：量子启发的矩阵算法</a></h4>
+<ul>
+<li>张量网络方法</li>
+<li>量子奇异值变换</li>
+<li>经典模拟的计算复杂度</li>
+<li>在机器学习中的潜力</li>
+</ul>
+<h2 id="_12">附录</h2>
+<h3 id="a"><a href="chapter19.html">附录A：数值稳定性速查表</a></h3>
+<h3 id="b"><a href="chapter20.html">附录B：性能调优检查清单</a></h3>
+<h3 id="c"><a href="chapter21.html">附录C：常用矩阵恒等式</a></h3>
+<h2 id="_13">使用说明</h2>
+<ul>
+<li>每章独立成文，可按需阅读</li>
+<li>习题答案默认折叠，鼓励独立思考</li>
+<li>"Gotchas"部分总结实践中的常见陷阱</li>
+<li>"研究方向"指出值得深入探索的开放问题</li>
+</ul>
+<h2 id="_14">符号约定</h2>
+<ul>
+<li>$\mathbf{A}, \mathbf{B}$：矩阵</li>
+<li>$\mathbf{x}, \mathbf{y}$：向量</li>
+<li>$\lambda_i$：特征值</li>
+<li>$\kappa(\mathbf{A})$：条件数</li>
+<li>$\mathcal{O}(\cdot)$：计算复杂度</li>
+<li>$\mathbb{E}[\cdot]$：期望</li>
+<li>$|\cdot|_F$：Frobenius范数</li>
+<li>$\otimes$：Kronecker积</li>
+<li>$\odot$：Hadamard积</li>
+</ul>
+            </article>
+            
+            <nav class="page-nav"><a href="./chapter1.html" class="nav-link next">第1章：二阶优化的统一框架 →</a></nav>
+        </main>
+    </div>
+</body>
+</html>
